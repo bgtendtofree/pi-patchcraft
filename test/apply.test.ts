@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -152,5 +152,63 @@ describe("patch planning and application", () => {
 		await writeFile(target, "concurrent\n");
 		await assert.rejects(applyPatchPlan(plan), /changed before apply/);
 		assert.equal(await readFile(target, "utf8"), "concurrent\n");
+	});
+
+	it("detects add targets created between planning and apply", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "new.txt");
+		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: new.txt\n+planned\n*** End Patch");
+		await writeFile(target, "concurrent\n");
+		await assert.rejects(applyPatchPlan(plan), /target changed before apply/);
+		assert.equal(await readFile(target, "utf8"), "concurrent\n");
+	});
+
+	it("detects move targets created between planning and apply", async () => {
+		const cwd = await workspace();
+		const source = path.join(cwd, "source.txt");
+		const target = path.join(cwd, "target.txt");
+		await writeFile(source, "source\n");
+		const plan = await planPatch(
+			cwd,
+			"*** Begin Patch\n*** Update File: source.txt\n*** Move to: target.txt\n*** End Patch",
+		);
+		await writeFile(target, "concurrent\n");
+		await assert.rejects(applyPatchPlan(plan), /target changed before apply/);
+		assert.equal(await readFile(source, "utf8"), "source\n");
+		assert.equal(await readFile(target, "utf8"), "concurrent\n");
+	});
+
+	it("detects deleted sources between planning and apply", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "delete.txt");
+		await writeFile(target, "planned\n");
+		const plan = await planPatch(cwd, "*** Begin Patch\n*** Delete File: delete.txt\n*** End Patch");
+		await rm(target);
+		await assert.rejects(applyPatchPlan(plan), /source changed before apply/);
+	});
+
+	it("preserves executable mode when updating files", { skip: process.platform === "win32" }, async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "script.sh");
+		await writeFile(target, "old\n");
+		await chmod(target, 0o755);
+		const plan = await planPatch(cwd, "*** Begin Patch\n*** Update File: script.sh\n@@\n-old\n+new\n*** End Patch");
+		await applyPatchPlan(plan);
+		assert.equal((await stat(target)).mode & 0o777, 0o755);
+	});
+
+	it("preserves executable mode when moving files", { skip: process.platform === "win32" }, async () => {
+		const cwd = await workspace();
+		const source = path.join(cwd, "source.sh");
+		const target = path.join(cwd, "target.sh");
+		await writeFile(source, "echo test\n");
+		await chmod(source, 0o755);
+		const plan = await planPatch(
+			cwd,
+			"*** Begin Patch\n*** Update File: source.sh\n*** Move to: target.sh\n*** End Patch",
+		);
+		await applyPatchPlan(plan);
+		assert.equal((await stat(target)).mode & 0o777, 0o755);
+		await assert.rejects(stat(source));
 	});
 });
