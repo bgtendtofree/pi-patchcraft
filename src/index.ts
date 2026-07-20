@@ -7,7 +7,7 @@ import type { ApplyPatchDetails } from "./types.ts";
 
 const patchParameters = Type.Object({
 	patch: Type.String({
-		description: "Complete Codex patch from *** Begin Patch through *** End Patch",
+		description: "The entire contents of the apply_patch command",
 	}),
 });
 
@@ -44,11 +44,11 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		name: "apply_patch",
 		label: "Apply Patch",
 		description:
-			"Apply a transactional Codex-format patch. Supports strict add, update, delete, and move operations inside the workspace.",
-		promptSnippet: "Apply transactional multi-file Codex-format patches",
+			"Use apply_patch to edit files with one Codex-format patch from *** Begin Patch through *** End Patch. Supports Add, Delete, Update, and optional Move to operations using relative workspace paths.",
+		promptSnippet: "Edit files with Codex-format apply_patch",
 		promptGuidelines: [
-			"Use apply_patch for file edits instead of bash, Python scripts, heredocs, or shell redirection when apply_patch is active.",
-			"After apply_patch succeeds, do not reread edited files only to confirm the patch applied.",
+			"Use apply_patch for file edits when apply_patch is active; combine related multi-file changes in one patch.",
+			"In apply_patch, use relative paths and prefix every added line, including new-file contents, with +.",
 		],
 		parameters: patchParameters,
 		prepareArguments: normalizeArguments,
