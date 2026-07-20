@@ -1,0 +1,58 @@
+{
+	"name": "pi-extension-template",
+	"version": "0.1.0",
+	"description": "Production-ready template for Pi TypeScript extensions",
+	"type": "module",
+	"license": "MIT",
+	"packageManager": "bun@1.3.14",
+	"engines": {
+		"node": ">=24"
+	},
+	"keywords": [
+		"pi-package",
+		"pi",
+		"pi-extension",
+		"template",
+		"typescript"
+	],
+	"files": [
+		"src",
+		"README.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"scripts": {
+		"check": "bun run typecheck",
+		"typecheck": "bunx --bun tsc -p tsconfig.json && bunx --bun tsc -p tsconfig.test.json",
+		"lint": "biome lint .",
+		"format": "biome format --write .",
+		"format:check": "biome format .",
+		"fix": "biome check --write .",
+		"quality": "biome ci .",
+		"test": "node --test",
+		"test:watch": "node --test --watch",
+		"test:coverage": "rm -rf coverage && mkdir -p coverage && node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-exclude=\"test/**/*.ts\" --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info",
+		"smoke": "pi --offline --no-extensions -e . --list-models",
+		"smoke:package": "node scripts/smoke-package.mjs",
+		"package:check": "npm pack --dry-run",
+		"validate": "bun run quality && bun run typecheck && bun run test",
+		"ci": "bun run quality && bun run typecheck && bun run test:coverage && bun run smoke && bun run package:check && bun run smoke:package"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.4",
+		"@earendil-works/pi-ai": "0.80.10",
+		"@earendil-works/pi-coding-agent": "0.80.10",
+		"@earendil-works/pi-tui": "0.80.10",
+		"@types/node": "^24.0.0",
+		"typebox": "1.1.38",
+		"typescript": "7.0.2"
+	}
+}
