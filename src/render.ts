@@ -10,14 +10,24 @@ interface RenderContext {
 	lastComponent: unknown;
 }
 
-function pathsFromPatch(patch: string): string[] {
-	return [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((match) => match[1] ?? "");
+function fallbackTitle(patch: string): string {
+	const lines = patch.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+	const headers = lines.filter((line) => /^\*\*\* (?:Add|Update|Delete) File: /.test(line));
+	if (headers.length === 0) return "Patch";
+	if (headers.length > 1) return `Patch ${headers.length} files`;
+	const header = headers[0] ?? "";
+	if (header.startsWith("*** Add File: ")) return `Add ${header.slice("*** Add File: ".length)}`;
+	if (header.startsWith("*** Delete File: ")) return `Delete ${header.slice("*** Delete File: ".length)}`;
+	const source = header.slice("*** Update File: ".length);
+	const headerIndex = lines.indexOf(header);
+	const next = lines[headerIndex + 1] ?? "";
+	return next.startsWith("*** Move to: ")
+		? `Move ${source} → ${next.slice("*** Move to: ".length)}`
+		: `Update ${source}`;
 }
 
 export function renderPatchCall(args: PatchArgs, theme: Theme): Text {
-	const paths = pathsFromPatch(args.patch);
-	const label = paths.length === 0 ? "Patch" : paths.length === 1 ? `Patch ${paths[0]}` : `Patch ${paths.length} files`;
-	return new Text(theme.fg("toolTitle", theme.bold(label)), 0, 0);
+	return new Text(theme.fg("toolTitle", theme.bold(fallbackTitle(args.patch))), 0, 0);
 }
 
 export function renderPatchResult(

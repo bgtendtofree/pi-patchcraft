@@ -8,7 +8,7 @@ describe("Patchcraft Progressive Tools adapter", () => {
 			patchcraftAdapter.title({
 				patch: "*** Begin Patch\n*** Update File: a.ts\n@@\n-a\n+b\n*** End Patch",
 			}),
-			{ verb: "Patch", subject: "a.ts" },
+			{ verb: "Update", subject: "a.ts" },
 		);
 		assert.deepEqual(
 			patchcraftAdapter.summarize?.({
@@ -18,7 +18,43 @@ describe("Patchcraft Progressive Tools adapter", () => {
 					result: { files: [{ operation: "update", path: "a.ts", targetPath: "a.ts" }], added: 1, removed: 1, fuzz: 0 },
 				},
 			}),
-			{ metrics: ["1 files", "+1", "-1"] },
+			{ metrics: ["1 file", "+1", "-1"] },
+		);
+	});
+
+	it("distinguishes add, delete, move, and multi-file patches", () => {
+		assert.deepEqual(patchcraftAdapter.title({ patch: "*** Begin Patch\n*** Add File: new.ts\n+x\n*** End Patch" }), {
+			verb: "Add",
+			subject: "new.ts",
+		});
+		assert.deepEqual(patchcraftAdapter.title({ patch: "*** Begin Patch\n*** Delete File: old.ts\n*** End Patch" }), {
+			verb: "Delete",
+			subject: "old.ts",
+		});
+		assert.deepEqual(
+			patchcraftAdapter.title({
+				patch: "*** Begin Patch\n*** Update File: old.ts\n*** Move to: new.ts\n@@\n-old\n+new\n*** End Patch",
+			}),
+			{ verb: "Move", subject: "old.ts → new.ts" },
+		);
+		assert.deepEqual(
+			patchcraftAdapter.title({
+				patch: "*** Begin Patch\n*** Add File: a.ts\n+a\n*** Delete File: b.ts\n*** End Patch",
+			}),
+			{ verb: "Patch", subject: "2 files", context: "a.ts, b.ts" },
+		);
+	});
+
+	it("omits zero-valued change metrics", () => {
+		assert.deepEqual(
+			patchcraftAdapter.summarize?.({
+				text: "done",
+				isError: false,
+				details: {
+					result: { files: [{ operation: "add", path: "a.ts", targetPath: "a.ts" }], added: 2, removed: 0, fuzz: 0 },
+				},
+			}),
+			{ metrics: ["1 file", "+2"] },
 		);
 	});
 });
