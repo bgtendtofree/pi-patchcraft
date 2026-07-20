@@ -58,5 +58,9 @@ PATCH`);
 			() => parsePatch("*** Begin Patch\n*** Frobnicate File: a.txt\n*** End Patch"),
 			/Unknown patch header/,
 		);
+		assert.throws(
+			() => parsePatch("*** Begin Patch\n*** Update File: a.txt\n@@invalid\n-old\n+new\n*** End Patch"),
+			/Invalid update marker/,
+		);
 	});
 });

@@ -11,6 +11,8 @@ const patchParameters = Type.Object({
 	}),
 });
 
+const managedTools = new Set(["apply_patch", "edit", "write"]);
+
 function normalizeArguments(args: unknown): { patch: string } {
 	if (typeof args === "string") return { patch: args };
 	if (typeof args !== "object" || args === null) return { patch: "" };
@@ -31,12 +33,27 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 
 	function syncTools(ctx: ExtensionContext): void {
 		baselineTools ??= pi.getActiveTools();
-		const base = baselineTools.filter((name) => name !== "apply_patch");
-		if (!wantsPatchcraft(ctx)) {
-			pi.setActiveTools(base);
-			return;
+		const current = pi.getActiveTools();
+		const usePatchcraft = wantsPatchcraft(ctx);
+		const desiredManaged = new Set<string>();
+		if (usePatchcraft) desiredManaged.add("apply_patch");
+		else {
+			if (baselineTools.includes("edit")) desiredManaged.add("edit");
+			if (baselineTools.includes("write")) desiredManaged.add("write");
 		}
-		pi.setActiveTools([...base.filter((name) => name !== "edit" && name !== "write"), "apply_patch"]);
+
+		const currentUnmanaged = current.filter((name) => !managedTools.has(name));
+		const currentUnmanagedSet = new Set(currentUnmanaged);
+		const next = baselineTools.filter(
+			(name) =>
+				(managedTools.has(name) && desiredManaged.has(name)) ||
+				(!managedTools.has(name) && currentUnmanagedSet.has(name)),
+		);
+		for (const name of currentUnmanaged) {
+			if (!next.includes(name)) next.push(name);
+		}
+		if (usePatchcraft && !next.includes("apply_patch")) next.push("apply_patch");
+		pi.setActiveTools(next);
 	}
 
 	registerProgressiveAdapter(patchcraftAdapter);

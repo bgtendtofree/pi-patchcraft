@@ -22,6 +22,12 @@ interface FileState {
 	mode: number;
 }
 
+interface SplitContent {
+	lines: string[];
+	lineEnding: "\n" | "\r\n" | "\r";
+	hasFinalLineEnding: boolean;
+}
+
 function throwIfAborted(signal?: AbortSignal): void {
 	if (signal?.aborted) throw new PatchApplicationError("Operation aborted");
 }
@@ -63,14 +69,17 @@ function findSequence(lines: string[], pattern: string[], start: number, eof: bo
 	return undefined;
 }
 
-function splitLines(content: string): string[] {
+function splitContent(content: string): SplitContent {
+	const matchedLineEnding = content.match(/\r\n|\r|\n/)?.[0];
+	const lineEnding = matchedLineEnding === "\r\n" || matchedLineEnding === "\r" ? matchedLineEnding : "\n";
+	const hasFinalLineEnding = /(?:\r\n|\r|\n)$/.test(content);
 	const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-	if (lines.at(-1) === "") lines.pop();
-	return lines;
+	if (hasFinalLineEnding) lines.pop();
+	return { lines, lineEnding, hasFinalLineEnding };
 }
 
 function applyChunks(content: string, filePath: string, chunks: PatchChunk[]): { content: string; fuzz: number } {
-	const lines = splitLines(content);
+	const { lines, lineEnding, hasFinalLineEnding } = splitContent(content);
 	const replacements: Array<{ start: number; oldLength: number; newLines: string[] }> = [];
 	let cursor = 0;
 	let fuzz = 0;
@@ -84,7 +93,8 @@ function applyChunks(content: string, filePath: string, chunks: PatchChunk[]): {
 		}
 
 		if (chunk.oldLines.length === 0) {
-			replacements.push({ start: lines.length, oldLength: 0, newLines: chunk.newLines });
+			const insertionPoint = chunk.endOfFile || chunk.contexts.length === 0 ? lines.length : cursor;
+			replacements.push({ start: insertionPoint, oldLength: 0, newLines: chunk.newLines });
 			continue;
 		}
 
@@ -101,7 +111,8 @@ function applyChunks(content: string, filePath: string, chunks: PatchChunk[]): {
 	for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
 		next.splice(replacement.start, replacement.oldLength, ...replacement.newLines);
 	}
-	return { content: `${next.join("\n")}\n`, fuzz };
+	const finalLineEnding = hasFinalLineEnding ? lineEnding : "";
+	return { content: `${next.join(lineEnding)}${finalLineEnding}`, fuzz };
 }
 
 async function readState(absolutePath: string): Promise<FileState | undefined> {

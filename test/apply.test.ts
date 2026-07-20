@@ -64,6 +64,42 @@ describe("patch planning and application", () => {
 		await assert.rejects(readFile(path.join(cwd, "old.txt")));
 	});
 
+	it("inserts pure additions after context instead of at end of file", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "value.txt");
+		await writeFile(target, "before\nmarker\nafter\n");
+		const plan = await planPatch(
+			cwd,
+			"*** Begin Patch\n*** Update File: value.txt\n@@ marker\n+inserted\n*** End Patch",
+		);
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(target, "utf8"), "before\nmarker\ninserted\nafter\n");
+	});
+
+	it("preserves line endings and final newline state", async () => {
+		const cwd = await workspace();
+		const crlfTarget = path.join(cwd, "crlf.txt");
+		const noFinalNewlineTarget = path.join(cwd, "no-final-newline.txt");
+		await writeFile(crlfTarget, "before\r\nafter\r\n");
+		await writeFile(noFinalNewlineTarget, "before\nafter");
+		const plan = await planPatch(
+			cwd,
+			`*** Begin Patch
+*** Update File: crlf.txt
+@@
+-before
++changed
+*** Update File: no-final-newline.txt
+@@
+-after
++changed
+*** End Patch`,
+		);
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(crlfTarget, "utf8"), "changed\r\nafter\r\n");
+		assert.equal(await readFile(noFinalNewlineTarget, "utf8"), "before\nchanged");
+	});
+
 	it("rejects traversal and symlink escapes", async () => {
 		const cwd = await workspace();
 		const outside = await workspace();

@@ -85,7 +85,12 @@ export function parsePatch(patchText: string): PatchOperation[] {
 				const contexts: string[] = [];
 				while ((lines[index] ?? "").startsWith("@@")) {
 					const marker = lines[index] ?? "";
-					if (marker !== "@@") contexts.push(marker.slice(3));
+					if (marker === "@@") {
+						index++;
+						continue;
+					}
+					if (!marker.startsWith("@@ ")) throw new PatchParseError(`Invalid update marker: '${marker}'`);
+					contexts.push(marker.slice(3));
 					index++;
 				}
 
