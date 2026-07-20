@@ -43,12 +43,10 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "apply_patch",
 		label: "Apply Patch",
-		description:
-			"Use apply_patch to edit files with one Codex-format patch from *** Begin Patch through *** End Patch. Supports Add, Delete, Update, and optional Move to operations using relative workspace paths.",
-		promptSnippet: "Edit files with Codex-format apply_patch",
+		description: "Apply a Codex-format patch to add, update, move, or delete files inside the workspace.",
+		promptSnippet: "Add, update, move, or delete files with apply_patch",
 		promptGuidelines: [
-			"Use apply_patch for file edits when apply_patch is active; combine related multi-file changes in one patch.",
-			"In apply_patch, use relative paths and prefix every added line, including new-file contents, with +.",
+			"Use apply_patch for file edits when available, combining related multi-file changes in one patch.",
 		],
 		parameters: patchParameters,
 		prepareArguments: normalizeArguments,
