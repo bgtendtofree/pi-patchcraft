@@ -51,6 +51,8 @@ describe("pi-patchcraft extension", () => {
 		activeTools.splice(2, 0, "external_tool");
 		handlers.get("model_select")?.({}, { model: { id: "claude-sonnet-4", provider: "anthropic" } });
 		assert.deepEqual(activeTools, ["read", "edit", "write", "bash", "external_tool"]);
+		handlers.get("model_select")?.({}, { model: { id: "codex-platform-model", provider: "custom" } });
+		assert.deepEqual(activeTools, ["read", "edit", "write", "bash", "external_tool"]);
 
 		assert.deepEqual(tool?.prepareArguments?.({ input: "patch" }), { patch: "patch" });
 		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-tool-"));

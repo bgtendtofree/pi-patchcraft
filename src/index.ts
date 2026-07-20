@@ -25,7 +25,7 @@ function normalizeArguments(args: unknown): { patch: string } {
 
 function wantsPatchcraft(ctx: ExtensionContext): boolean {
 	const id = ctx.model?.id.toLowerCase() ?? "";
-	return id.includes("codex") || id.startsWith("gpt-");
+	return id.startsWith("gpt-");
 }
 
 export default function piPatchcraft(pi: ExtensionAPI): void {
