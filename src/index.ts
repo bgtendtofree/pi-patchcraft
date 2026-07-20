@@ -12,6 +12,13 @@ const patchParameters = Type.Object({
 });
 
 const managedTools = new Set(["apply_patch", "edit", "write"]);
+const modeEntryType = "patchcraft-mode";
+
+type PatchcraftMode = "auto" | "off" | "on";
+
+interface PatchcraftModeState {
+	mode: PatchcraftMode;
+}
 
 function normalizeArguments(args: unknown): { patch: string } {
 	if (typeof args === "string") return { patch: args };
@@ -23,13 +30,35 @@ function normalizeArguments(args: unknown): { patch: string } {
 	return { patch: "" };
 }
 
-function wantsPatchcraft(ctx: ExtensionContext): boolean {
+function autoWantsPatchcraft(ctx: ExtensionContext): boolean {
 	const id = ctx.model?.id.toLowerCase() ?? "";
 	return id.startsWith("gpt-");
 }
 
 export default function piPatchcraft(pi: ExtensionAPI): void {
 	let baselineTools: string[] | undefined;
+	let mode: PatchcraftMode = "auto";
+
+	function wantsPatchcraft(ctx: ExtensionContext): boolean {
+		if (mode === "on") return true;
+		if (mode === "off") return false;
+		return autoWantsPatchcraft(ctx);
+	}
+
+	function restoreMode(ctx: ExtensionContext): void {
+		mode = "auto";
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type !== "custom" || entry.customType !== modeEntryType) continue;
+			const saved = entry.data as PatchcraftModeState | undefined;
+			if (saved?.mode === "auto" || saved?.mode === "on" || saved?.mode === "off") mode = saved.mode;
+		}
+	}
+
+	function modeStatus(ctx: ExtensionContext): string {
+		const enabled = wantsPatchcraft(ctx);
+		const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none";
+		return `Patchcraft mode: ${mode}\nEffective: ${enabled ? "enabled" : "disabled"}\nModel: ${model}`;
+	}
 
 	function syncTools(ctx: ExtensionContext): void {
 		baselineTools ??= pi.getActiveTools();
@@ -57,6 +86,24 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	}
 
 	registerProgressiveAdapter(patchcraftAdapter);
+	pi.registerCommand("patchcraft", {
+		description: "Show or change apply_patch tool mode",
+		async handler(args, ctx) {
+			const value = args.trim().toLowerCase();
+			if (value === "" || value === "status") {
+				ctx.ui.notify(`${modeStatus(ctx)}\nUsage: /patchcraft auto|on|off`, "info");
+				return;
+			}
+			if (value !== "auto" && value !== "on" && value !== "off") {
+				ctx.ui.notify("Usage: /patchcraft auto|on|off", "warning");
+				return;
+			}
+			mode = value;
+			pi.appendEntry<PatchcraftModeState>(modeEntryType, { mode });
+			syncTools(ctx);
+			ctx.ui.notify(modeStatus(ctx), "info");
+		},
+	});
 	pi.registerTool({
 		name: "apply_patch",
 		label: "Apply Patch",
@@ -117,6 +164,11 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		baselineTools = pi.getActiveTools();
+		restoreMode(ctx);
+		syncTools(ctx);
+	});
+	pi.on("session_tree", (_event, ctx) => {
+		restoreMode(ctx);
 		syncTools(ctx);
 	});
 	pi.on("model_select", (_event, ctx) => syncTools(ctx));

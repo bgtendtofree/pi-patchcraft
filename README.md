@@ -2,7 +2,7 @@
 
 Transactional Codex-style `apply_patch` tool for [Pi](https://pi.dev).
 
-Patchcraft gives GPT and Codex-family models their familiar patch language while keeping file changes inside the active workspace. It validates the full patch before mutation, serializes touched files through Pi's mutation queue, writes atomically, and rolls back already-applied changes when a later operation fails.
+Patchcraft gives GPT models their familiar Codex patch language while keeping file changes inside the active workspace. It validates the full patch before mutation, serializes touched files through Pi's mutation queue, writes atomically, and rolls back already-applied changes when a later operation fails.
 
 ## Features
 
@@ -16,8 +16,9 @@ Patchcraft gives GPT and Codex-family models their familiar patch language while
 - Best-effort patch-level rollback
 - Concurrent source-change detection
 - Exact, whitespace-tolerant, and Unicode-normalized context matching
-- Automatic `apply_patch` activation for GPT/Codex models
+- Automatic `apply_patch` activation for `gpt-*` models
 - Automatic restoration of Pi `edit` / `write` tools for other models
+- Session-scoped `/patchcraft auto|on|off` override for any model
 - Optional [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools) compact rendering
 - Independent fallback renderer when Progressive Tools is absent
 
@@ -46,6 +47,19 @@ Tool input uses Pi's public JSON tool API:
 ```
 
 Compatibility input names `input` and `patchText`, plus raw string arguments, are normalized before schema validation.
+
+## Tool mode
+
+Patchcraft defaults to automatic mode: `gpt-*` models receive `apply_patch` in place of Pi `edit` and `write`; other models keep Pi's standard editing tools.
+
+```text
+/patchcraft          Show current mode and effective state
+/patchcraft auto     Select by model id (default)
+/patchcraft on       Force apply_patch for current session
+/patchcraft off      Restore edit/write for current session
+```
+
+Mode changes persist in current session across reloads, resumes, and tree navigation. New sessions default to `auto`.
 
 ## Safety semantics
 

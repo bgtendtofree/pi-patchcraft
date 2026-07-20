@@ -18,6 +18,17 @@ interface RegisteredTool {
 	): Promise<{ content: Array<{ type: string; text: string }> }>;
 }
 
+interface RegisteredCommand {
+	handler(
+		args: string,
+		ctx: {
+			model?: { id: string; provider: string };
+			sessionManager: { getBranch(): unknown[] };
+			ui: { notify(message: string, level: string): void };
+		},
+	): Promise<void>;
+}
+
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -42,11 +53,18 @@ describe("pi-patchcraft extension", () => {
 			setActiveTools(names: string[]) {
 				activeTools = [...names];
 			},
+			registerCommand() {},
 		} as unknown as ExtensionAPI;
 
 		piPatchcraft(pi);
 		assert.equal(tool?.name, "apply_patch");
-		handlers.get("session_start")?.({}, { model: { id: "gpt-5", provider: "openai" } });
+		handlers.get("session_start")?.(
+			{},
+			{
+				model: { id: "gpt-5", provider: "openai" },
+				sessionManager: { getBranch: () => [] },
+			},
+		);
 		assert.deepEqual(activeTools, ["read", "bash", "apply_patch"]);
 		activeTools.splice(2, 0, "external_tool");
 		handlers.get("model_select")?.({}, { model: { id: "claude-sonnet-4", provider: "anthropic" } });
@@ -69,5 +87,57 @@ describe("pi-patchcraft extension", () => {
 		);
 		assert.match(result?.content[0]?.text ?? "", /Patch applied to 1 file/);
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
+	});
+
+	it("supports session-scoped automatic, forced-on, and forced-off modes", async () => {
+		let command: RegisteredCommand | undefined;
+		const handlers = new Map<string, (event: unknown, ctx: unknown) => void>();
+		const entries: Array<{ type: "custom"; customType: string; data: { mode: string } }> = [];
+		const notifications: string[] = [];
+		let activeTools = ["read", "edit", "write", "bash"];
+		const pi = {
+			registerTool() {},
+			registerCommand(_name: string, value: RegisteredCommand) {
+				command = value;
+			},
+			on(name: string, handler: (event: unknown, ctx: unknown) => void) {
+				handlers.set(name, handler);
+			},
+			getActiveTools() {
+				return [...activeTools];
+			},
+			setActiveTools(names: string[]) {
+				activeTools = [...names];
+			},
+			appendEntry(customType: string, data: { mode: string }) {
+				entries.push({ type: "custom", customType, data });
+			},
+		} as unknown as ExtensionAPI;
+		const context = {
+			model: { id: "claude-sonnet-4", provider: "anthropic" },
+			sessionManager: { getBranch: () => entries },
+			ui: { notify: (message: string) => notifications.push(message) },
+		};
+
+		piPatchcraft(pi);
+		handlers.get("session_start")?.({}, context);
+		assert.deepEqual(activeTools, ["read", "edit", "write", "bash"]);
+
+		await command?.handler("on", context);
+		assert.deepEqual(activeTools, ["read", "bash", "apply_patch"]);
+		assert.deepEqual(entries.at(-1)?.data, { mode: "on" });
+
+		context.model = { id: "gpt-5", provider: "openai" };
+		await command?.handler("off", context);
+		assert.deepEqual(activeTools, ["read", "edit", "write", "bash"]);
+
+		await command?.handler("auto", context);
+		assert.deepEqual(activeTools, ["read", "bash", "apply_patch"]);
+		await command?.handler("status", context);
+		assert.match(notifications.at(-1) ?? "", /Patchcraft mode: auto/);
+
+		entries.push({ type: "custom", customType: "patchcraft-mode", data: { mode: "off" } });
+		handlers.get("session_tree")?.({}, context);
+		assert.deepEqual(activeTools, ["read", "edit", "write", "bash"]);
 	});
 });
