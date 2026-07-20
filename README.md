@@ -1,31 +1,96 @@
-# Pi Extension Template
+# Pi Patchcraft
 
-Production-ready starting point for a TypeScript extension package for [Pi](https://pi.dev).
+Transactional Codex-style `apply_patch` tool for [Pi](https://pi.dev).
 
-## Included
+Patchcraft gives GPT and Codex-family models their familiar patch language while keeping file changes inside the active workspace. It validates the full patch before mutation, serializes touched files through Pi's mutation queue, writes atomically, and rolls back already-applied changes when a later operation fails.
 
-- Node.js 24 runtime contract
-- Bun 1.3.14 development workflow
-- TypeScript 7 strict configuration
-- Biome 2.5.4 formatting, linting, and import organization
-- Node `node:test` tests and native coverage gates
-- Pi package manifest smoke test
-- Packed npm production-install smoke test against Pi 0.80.10
-- GitHub Actions CI and tag-based GitHub Releases
-- Minimal `hello_pi` tool example
+## Features
 
-## Create an extension
+- Codex `*** Begin Patch` / `*** End Patch` format
+- Add, update, delete, move, and rename-only operations
+- Multi-file patches in one tool call
+- Strict parser with actionable errors
+- Workspace traversal and symlink-escape protection
+- Full preflight before the first write
+- Atomic per-file writes with mode preservation
+- Best-effort patch-level rollback
+- Concurrent source-change detection
+- Exact, whitespace-tolerant, and Unicode-normalized context matching
+- Automatic `apply_patch` activation for GPT/Codex models
+- Automatic restoration of Pi `edit` / `write` tools for other models
+- Optional [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools) compact rendering
+- Independent fallback renderer when Progressive Tools is absent
 
-1. Click **Use this template** on GitHub.
-2. Clone the generated repository.
-3. Replace template identity:
-   - package name and description in `package.json`
-   - heading and documentation in `README.md`
-   - `hello_pi` tool name, schema, and implementation
-4. Keep Pi core imports as `"*"` peer dependencies.
-5. Pin exact Pi versions only in `devDependencies` for reproducible CI.
+## Patch format
+
+```text
+*** Begin Patch
+*** Add File: src/new.ts
++export const value = 1;
+*** Update File: src/app.ts
+@@ function main() {
+-oldCall();
++newCall();
+*** Update File: src/old.ts
+*** Move to: src/moved.ts
+*** Delete File: src/obsolete.ts
+*** End Patch
+```
+
+Tool input uses Pi's public JSON tool API:
+
+```json
+{
+  "patch": "*** Begin Patch\n...\n*** End Patch"
+}
+```
+
+Compatibility input names `input` and `patchText`, plus raw string arguments, are normalized before schema validation.
+
+## Safety semantics
+
+Patchcraft intentionally fails instead of guessing:
+
+- `Add File` target must not exist.
+- `Update File` and `Delete File` targets must exist and be regular files.
+- Move target must not exist.
+- Absolute paths and parent traversal are rejected.
+- Workspace symlink escapes are rejected.
+- Conflicting operations touching the same source or destination are rejected.
+- No-op updates are rejected.
+- Source content is revalidated after mutation queues are acquired.
+
+Patch-level rollback handles ordinary runtime failures. It is not a crash-safe filesystem transaction: process termination or machine failure during mutation can still leave partial state.
+
+## Install
+
+```bash
+pi install git:github.com/bgtendtofree/pi-patchcraft
+```
+
+Project-local:
+
+```bash
+pi install -l git:github.com/bgtendtofree/pi-patchcraft
+```
+
+One run:
+
+```bash
+pi -e git:github.com/bgtendtofree/pi-patchcraft
+```
+
+For compact tool rows and transcript detail navigation, install Progressive Tools too:
+
+```bash
+pi install git:github.com/bgtendtofree/pi-progressive-tools
+```
+
+Both extension load orders are supported through Progressive Tools provider protocol v1.
 
 ## Development
+
+Bun is development tooling. Runtime remains Node.js through Pi.
 
 ```bash
 bun install
@@ -39,39 +104,23 @@ bun run smoke:package
 bun run ci
 ```
 
-Pi loads TypeScript source directly through Jiti. No build step is required.
-
-## Package contract
-
-`package.json` declares the extension entry:
-
-```json
-{
-  "pi": {
-    "extensions": ["./src/index.ts"]
-  }
-}
-```
-
-Runtime dependencies that are not provided by Pi belong in `dependencies`. Pi-provided packages imported by source belong in `peerDependencies` with a `"*"` range.
-
-## Test locally in Pi
+Load local source:
 
 ```bash
 pi --offline --no-extensions -e . --list-models
-pi install -l file:./
+pi -e ./src/index.ts
 ```
 
-## Release
+## Current compatibility
 
-Update `package.json` version, commit, then push a matching tag:
+Development and package smoke tests pin:
 
-```bash
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
-```
+- Node.js 24
+- Bun 1.3.14
+- Pi 0.80.10
+- TypeScript 7
 
-Release workflow verifies the package before creating a GitHub Release.
+Pi runtime dependencies remain `"*"` peer dependencies.
 
 ## License
 
