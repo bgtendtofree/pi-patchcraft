@@ -76,6 +76,18 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(target, "utf8"), "before\nmarker\ninserted\nafter\n");
 	});
 
+	it("preserves patch order for pure additions at the same position", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "value.txt");
+		await writeFile(target, "base\n");
+		const plan = await planPatch(
+			cwd,
+			"*** Begin Patch\n*** Update File: value.txt\n@@\n+first\n@@\n+second\n*** End Patch",
+		);
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(target, "utf8"), "base\nfirst\nsecond\n");
+	});
+
 	it("preserves line endings and final newline state", async () => {
 		const cwd = await workspace();
 		const crlfTarget = path.join(cwd, "crlf.txt");

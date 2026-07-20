@@ -80,7 +80,7 @@ function splitContent(content: string): SplitContent {
 
 function applyChunks(content: string, filePath: string, chunks: PatchChunk[]): { content: string; fuzz: number } {
 	const { lines, lineEnding, hasFinalLineEnding } = splitContent(content);
-	const replacements: Array<{ start: number; oldLength: number; newLines: string[] }> = [];
+	const replacements: Array<{ start: number; oldLength: number; newLines: string[]; order: number }> = [];
 	let cursor = 0;
 	let fuzz = 0;
 
@@ -94,7 +94,12 @@ function applyChunks(content: string, filePath: string, chunks: PatchChunk[]): {
 
 		if (chunk.oldLines.length === 0) {
 			const insertionPoint = chunk.endOfFile || chunk.contexts.length === 0 ? lines.length : cursor;
-			replacements.push({ start: insertionPoint, oldLength: 0, newLines: chunk.newLines });
+			replacements.push({
+				start: insertionPoint,
+				oldLength: 0,
+				newLines: chunk.newLines,
+				order: replacements.length,
+			});
 			continue;
 		}
 
@@ -102,13 +107,18 @@ function applyChunks(content: string, filePath: string, chunks: PatchChunk[]): {
 		if (!match) {
 			throw new PatchApplicationError(`Failed to find expected lines in ${filePath}:\n${chunk.oldLines.join("\n")}`);
 		}
-		replacements.push({ start: match.index, oldLength: chunk.oldLines.length, newLines: chunk.newLines });
+		replacements.push({
+			start: match.index,
+			oldLength: chunk.oldLines.length,
+			newLines: chunk.newLines,
+			order: replacements.length,
+		});
 		cursor = match.index + chunk.oldLines.length;
 		fuzz += match.fuzz;
 	}
 
 	const next = [...lines];
-	for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
+	for (const replacement of replacements.sort((left, right) => right.start - left.start || right.order - left.order)) {
 		next.splice(replacement.start, replacement.oldLength, ...replacement.newLines);
 	}
 	const finalLineEnding = hasFinalLineEnding ? lineEnding : "";
