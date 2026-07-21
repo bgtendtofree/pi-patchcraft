@@ -1,5 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
-import type { PatchPlan, PatchResult } from "./types.ts";
+import type { PatchPlan } from "./types.ts";
 
 const API_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/api/v1");
 const PENDING_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/pending/v1");
@@ -86,11 +86,6 @@ function isPatchPlan(value: unknown): value is PatchPlan {
 	return Array.isArray(record.changes) && typeof record.added === "number" && typeof record.removed === "number";
 }
 
-function isPatchResult(value: unknown): value is PatchResult {
-	const record = asRecord(value);
-	return Array.isArray(record.files) && typeof record.added === "number" && typeof record.removed === "number";
-}
-
 export const patchcraftAdapter: ProgressiveToolAdapter = {
 	version: 1,
 	id: "@bgtendtofree/pi-patchcraft/apply-patch",
@@ -120,15 +115,13 @@ export const patchcraftAdapter: ProgressiveToolAdapter = {
 	},
 	summarize(view) {
 		const details = asRecord(view.details);
-		const result = details.result;
 		const plan = details.plan;
-		const data = isPatchResult(result) ? result : isPatchPlan(plan) ? plan : undefined;
-		if (!data) return view.isError ? { status: "failed" } : {};
-		const fileCount = "files" in data ? data.files.length : data.changes.length;
+		if (!isPatchPlan(plan)) return view.isError ? { status: "failed" } : {};
+		const fileCount = plan.changes.length;
 		const metrics = [`${fileCount} ${fileCount === 1 ? "file" : "files"}`];
-		if (data.added > 0) metrics.push(`+${data.added}`);
-		if (data.removed > 0) metrics.push(`-${data.removed}`);
-		if (data.fuzz > 0) metrics.push(`fuzz ${data.fuzz}`);
+		if (plan.added > 0) metrics.push(`+${plan.added}`);
+		if (plan.removed > 0) metrics.push(`-${plan.removed}`);
+		if (plan.fuzz > 0) metrics.push(`fuzz ${plan.fuzz}`);
 		return { metrics };
 	},
 };

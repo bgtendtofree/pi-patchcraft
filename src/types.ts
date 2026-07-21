@@ -47,19 +47,7 @@ export interface PatchPlan {
 	fuzz: number;
 }
 
-export interface PatchResult {
-	files: Array<{
-		operation: PlannedFileChange["operation"];
-		path: string;
-		targetPath: string;
-	}>;
-	added: number;
-	removed: number;
-	fuzz: number;
-}
-
 export interface ApplyPatchDetails {
 	stage: "validating" | "applying" | "done";
 	plan?: PatchPlan;
-	result?: PatchResult;
 }

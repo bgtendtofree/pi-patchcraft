@@ -37,8 +37,7 @@
 		]
 	},
 	"scripts": {
-		"check": "bun run typecheck",
-		"typecheck": "bunx --bun tsc -p tsconfig.json && bunx --bun tsc -p tsconfig.test.json",
+		"typecheck": "bunx --bun tsc -p tsconfig.test.json",
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"format:check": "biome format .",

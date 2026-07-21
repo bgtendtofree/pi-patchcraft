@@ -38,8 +38,7 @@ describe("patch planning and application", () => {
 		assert.equal(plan.added, 2);
 		assert.equal(plan.removed, 2);
 
-		const result = await applyPatchPlan(plan);
-		assert.equal(result.files.length, 3);
+		await applyPatchPlan(plan);
 		assert.equal(await readFile(path.join(cwd, "nested/new.txt"), "utf8"), "created\n");
 		assert.equal(await readFile(path.join(cwd, "update.txt"), "utf8"), "after\n");
 		await assert.rejects(readFile(path.join(cwd, "delete.txt")));

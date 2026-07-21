@@ -3,7 +3,7 @@ import path from "node:path";
 import { generateUnifiedPatch, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { parsePatch } from "./parser.ts";
 import { resolvePatchPath } from "./paths.ts";
-import type { PatchChunk, PatchPlan, PatchResult, PlannedFileChange } from "./types.ts";
+import type { PatchChunk, PatchPlan, PlannedFileChange } from "./types.ts";
 
 export class PatchApplicationError extends Error {
 	constructor(message: string) {
@@ -315,10 +315,10 @@ async function validatePlanState(plan: PatchPlan): Promise<void> {
 	}
 }
 
-export async function applyPatchPlan(plan: PatchPlan, signal?: AbortSignal): Promise<PatchResult> {
+export async function applyPatchPlan(plan: PatchPlan, signal?: AbortSignal): Promise<void> {
 	const paths = [...new Set(plan.changes.flatMap((change) => [change.absolutePath, change.absoluteTargetPath]))].sort();
 
-	return withQueues(paths, 0, async () => {
+	await withQueues(paths, 0, async () => {
 		throwIfAborted(signal);
 		await validatePlanState(plan);
 		const applied: PlannedFileChange[] = [];
@@ -358,16 +358,5 @@ export async function applyPatchPlan(plan: PatchPlan, signal?: AbortSignal): Pro
 					: `Rollback failed:\n${rollbackFailures.join("\n")}`;
 			throw new PatchApplicationError(`Patch application failed: ${original}\n${suffix}`);
 		}
-
-		return {
-			files: plan.changes.map((change) => ({
-				operation: change.operation,
-				path: change.path,
-				targetPath: change.targetPath,
-			})),
-			added: plan.added,
-			removed: plan.removed,
-			fuzz: plan.fuzz,
-		};
 	});
 }

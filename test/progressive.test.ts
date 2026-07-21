@@ -15,7 +15,7 @@ describe("Patchcraft Progressive Tools adapter", () => {
 				text: "done",
 				isError: false,
 				details: {
-					result: { files: [{ operation: "update", path: "a.ts", targetPath: "a.ts" }], added: 1, removed: 1, fuzz: 0 },
+					plan: { changes: [{}], added: 1, removed: 1, fuzz: 0 },
 				},
 			}),
 			{ metrics: ["1 file", "+1", "-1"] },
@@ -51,7 +51,7 @@ describe("Patchcraft Progressive Tools adapter", () => {
 				text: "done",
 				isError: false,
 				details: {
-					result: { files: [{ operation: "add", path: "a.ts", targetPath: "a.ts" }], added: 2, removed: 0, fuzz: 0 },
+					plan: { changes: [{}], added: 2, removed: 0, fuzz: 0 },
 				},
 			}),
 			{ metrics: ["1 file", "+2"] },

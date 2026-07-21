@@ -126,22 +126,22 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 				content: [{ type: "text", text: `Applying patch to ${plan.changes.length} file(s)…` }],
 				details: { stage: "applying", plan } satisfies ApplyPatchDetails,
 			});
-			const result = await applyPatchPlan(plan, signal);
+			await applyPatchPlan(plan, signal);
 			return {
 				content: [
 					{
 						type: "text",
 						text: [
-							`Patch applied to ${result.files.length} file(s).`,
-							...result.files.map((file) =>
-								file.operation === "move"
-									? `move: ${file.path} -> ${file.targetPath}`
-									: `${file.operation}: ${file.targetPath}`,
+							`Patch applied to ${plan.changes.length} file(s).`,
+							...plan.changes.map((change) =>
+								change.operation === "move"
+									? `move: ${change.path} -> ${change.targetPath}`
+									: `${change.operation}: ${change.targetPath}`,
 							),
 						].join("\n"),
 					},
 				],
-				details: { stage: "done", plan, result } satisfies ApplyPatchDetails,
+				details: { stage: "done", plan } satisfies ApplyPatchDetails,
 			};
 		},
 		renderShell: "self",
@@ -157,7 +157,6 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 						{ content: result.content, details: result.details as ApplyPatchDetails | undefined },
 						options,
 						theme,
-						context,
 					);
 		},
 	});
