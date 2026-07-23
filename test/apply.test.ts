@@ -111,18 +111,29 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(noFinalNewlineTarget, "utf8"), "before\nchanged");
 	});
 
-	it("rejects traversal and symlink escapes", async () => {
+	it("supports absolute, parent, and symlink paths like Pi file tools", async () => {
 		const cwd = await workspace();
 		const outside = await workspace();
 		await symlink(outside, path.join(cwd, "link"), process.platform === "win32" ? "junction" : "dir");
-		await assert.rejects(
-			planPatch(cwd, "*** Begin Patch\n*** Add File: ../outside.txt\n+x\n*** End Patch"),
-			/escapes workspace/,
+		const absolute = path.join(outside, "absolute.txt");
+		const parentName = `${path.basename(cwd)}-parent.txt`;
+		const parent = path.join(path.dirname(cwd), parentName);
+		const plan = await planPatch(
+			cwd,
+			`*** Begin Patch
+*** Add File: ${absolute}
++absolute
+*** Add File: ../${parentName}
++parent
+*** Add File: link/symlink.txt
++symlink
+*** End Patch`,
 		);
-		await assert.rejects(
-			planPatch(cwd, "*** Begin Patch\n*** Add File: link/outside.txt\n+x\n*** End Patch"),
-			/escapes workspace through symlink/,
-		);
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(absolute, "utf8"), "absolute\n");
+		assert.equal(await readFile(parent, "utf8"), "parent\n");
+		assert.equal(await readFile(path.join(outside, "symlink.txt"), "utf8"), "symlink\n");
+		await rm(parent);
 	});
 
 	it("rejects precondition failures and conflicting paths", async () => {
