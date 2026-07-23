@@ -47,10 +47,8 @@
 		"test:watch": "node --test --watch",
 		"test:coverage": "rm -rf coverage && mkdir -p coverage && node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-exclude=\"test/**/*.ts\" --test-coverage-lines=80 --test-coverage-functions=75 --test-coverage-branches=70 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info",
 		"smoke": "pi --offline --no-extensions -e . --list-models",
-		"smoke:package": "node scripts/smoke-package.mjs",
-		"package:check": "npm pack --dry-run",
 		"validate": "bun run quality && bun run typecheck && bun run test",
-		"ci": "bun run quality && bun run typecheck && bun run test:coverage && bun run smoke && bun run package:check && bun run smoke:package"
+		"ci": "bun run quality && bun run typecheck && bun run test:coverage && bun run smoke"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "*",

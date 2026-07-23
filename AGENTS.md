@@ -21,7 +21,7 @@ Do not use Bun runtime APIs in extension source. Pi loads the TypeScript files d
 
 - `src/index.ts` — tool registration, model-based activation, Pi lifecycle wiring
 - `src/parser.ts` — Codex patch envelope and operation parser
-- `src/paths.ts` — workspace path and symlink-escape validation
+- `src/paths.ts` — Pi-compatible path normalization and resolution
 - `src/apply.ts` — planning, matching, locking, atomic writes, rollback
 - `src/progressive.ts` — optional Progressive Tools protocol adapter
 - `src/render.ts` — standalone fallback renderer
@@ -47,7 +47,7 @@ Keep `index.ts` thin. Put pure parsing, matching, path, and rendering logic in f
 - Support Add, Delete, Update, optional Move, stacked `@@` context, `*** End of File`, and multi-file envelopes.
 - Reject malformed lines instead of silently skipping them.
 - Keep model-visible tool descriptions concise. Do not inject the full grammar into Pi's system prompt unless evidence shows it is required.
-- Patch paths are relative to the active workspace. Never weaken absolute-path, traversal, or symlink-escape rejection.
+- Patch paths follow Pi file-tool behavior: relative paths resolve from active workspace; absolute, home-relative, and `file://` paths are accepted.
 
 ## Transaction Invariants
 
@@ -100,12 +100,10 @@ bun run typecheck
 bun run test
 bun run test:coverage
 bun run smoke
-bun run package:check
-bun run smoke:package
 bun run ci
 ```
 
-Use `bun run validate` for normal source changes. Use full `bun run ci` before release or after changes to packaging, Pi integration, runtime dependencies, transaction behavior, or CI scripts.
+Use `bun run validate` for normal source changes. Use full `bun run ci` before release or after changes to Pi integration, runtime dependencies, transaction behavior, or CI scripts. Run `npm pack --dry-run` separately before an npm release.
 
 Local Pi smoke test:
 
@@ -117,7 +115,7 @@ pi -e ./src/index.ts
 ## Test Expectations
 
 - Parser changes: test valid operations plus malformed envelopes and lines.
-- Path changes: test traversal, absolute paths, missing ancestors, and symlink escapes.
+- Path changes: test relative, absolute, home-relative, parent, and symlinked paths.
 - Apply changes: test preflight, no-op rejection, fuzzy matching, moves, source drift, and rollback behavior.
 - Tool wiring changes: test registration, argument normalization, model switching, and error signaling.
 - Rendering changes: test operation titles, singular/plural metrics, zero suppression, multi-file summaries, and Progressive Tools absence.

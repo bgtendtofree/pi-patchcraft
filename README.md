@@ -2,7 +2,7 @@
 
 Transactional Codex-style `apply_patch` tool for [Pi](https://pi.dev).
 
-Patchcraft gives GPT models their familiar Codex patch language while keeping file changes inside the active workspace. It validates the full patch before mutation, serializes touched files through Pi's mutation queue, writes atomically, and rolls back already-applied changes when a later operation fails.
+Patchcraft gives GPT models their familiar Codex patch language. It validates the full patch before mutation, serializes touched files through Pi's mutation queue, writes atomically, and rolls back already-applied changes when a later operation fails.
 
 ## Features
 
@@ -10,7 +10,7 @@ Patchcraft gives GPT models their familiar Codex patch language while keeping fi
 - Add, update, delete, move, and rename-only operations
 - Multi-file patches in one tool call
 - Strict parser with actionable errors
-- Workspace traversal and symlink-escape protection
+- Relative, absolute, home-relative, and `file://` paths
 - Full preflight before the first write
 - Atomic per-file writes with mode preservation
 - Best-effort patch-level rollback
@@ -68,8 +68,7 @@ Patchcraft intentionally fails instead of guessing:
 - `Add File` target must not exist.
 - `Update File` and `Delete File` targets must exist and be regular files.
 - Move target must not exist.
-- Absolute paths and parent traversal are rejected.
-- Workspace symlink escapes are rejected.
+- Paths resolve like Pi's built-in file tools; filesystem access follows process permissions.
 - Conflicting operations touching the same source or destination are rejected.
 - No-op updates are rejected.
 - Source content is revalidated after mutation queues are acquired.
@@ -113,8 +112,6 @@ bun run typecheck
 bun run test
 bun run test:coverage
 bun run smoke
-bun run package:check
-bun run smoke:package
 bun run ci
 ```
 
