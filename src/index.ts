@@ -30,11 +30,6 @@ function normalizeArguments(args: unknown): { patch: string } {
 	return { patch: "" };
 }
 
-function autoWantsPatchcraft(ctx: ExtensionContext): boolean {
-	const id = ctx.model?.id.toLowerCase() ?? "";
-	return id.startsWith("gpt-");
-}
-
 export default function piPatchcraft(pi: ExtensionAPI): void {
 	let baselineTools: string[] | undefined;
 	let mode: PatchcraftMode = "auto";
@@ -42,7 +37,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	function wantsPatchcraft(ctx: ExtensionContext): boolean {
 		if (mode === "on") return true;
 		if (mode === "off") return false;
-		return autoWantsPatchcraft(ctx);
+		return (ctx.model?.id.toLowerCase() ?? "").startsWith("gpt-");
 	}
 
 	function restoreMode(ctx: ExtensionContext): void {
