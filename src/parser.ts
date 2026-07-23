@@ -7,10 +7,6 @@ export class PatchParseError extends Error {
 	}
 }
 
-function normalizePatchText(value: string): string {
-	return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-}
-
 function stripHeredoc(value: string): string {
 	const match = value.match(/^(?:cat\s+)?<<['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?\s*\n([\s\S]*?)\n\1\s*$/);
 	return match?.[2] ?? value;
@@ -23,7 +19,7 @@ function requirePath(value: string, header: string): string {
 }
 
 export function parsePatch(patchText: string): PatchOperation[] {
-	const normalized = stripHeredoc(normalizePatchText(patchText).trim()).trim();
+	const normalized = stripHeredoc(patchText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim()).trim();
 	const lines = normalized.split("\n");
 	if (lines[0]?.trim() !== "*** Begin Patch" || lines.at(-1)?.trim() !== "*** End Patch") {
 		throw new PatchParseError("Invalid patch format: expected *** Begin Patch ... *** End Patch envelope");

@@ -12,7 +12,6 @@ describe("Patchcraft Progressive Tools adapter", () => {
 		);
 		assert.deepEqual(
 			patchcraftAdapter.summarize?.({
-				text: "done",
 				isError: false,
 				details: {
 					plan: { changes: [{}], added: 1, removed: 1, fuzz: 0 },
@@ -48,7 +47,6 @@ describe("Patchcraft Progressive Tools adapter", () => {
 	it("omits zero-valued change metrics", () => {
 		assert.deepEqual(
 			patchcraftAdapter.summarize?.({
-				text: "done",
 				isError: false,
 				details: {
 					plan: { changes: [{}], added: 2, removed: 0, fuzz: 0 },

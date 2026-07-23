@@ -11,8 +11,6 @@ interface ProgressiveToolTitle {
 }
 
 interface ProgressiveToolResultView {
-	text: string;
-	content?: unknown[];
 	details?: unknown;
 	isError: boolean;
 }

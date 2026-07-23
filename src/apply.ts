@@ -274,25 +274,13 @@ async function applyChange(change: PlannedFileChange): Promise<void> {
 		await unlink(change.absolutePath);
 }
 
-async function restoreCurrentChange(change: PlannedFileChange): Promise<void> {
+async function rollbackChange(change: PlannedFileChange): Promise<void> {
 	if (change.before === undefined) {
 		await rm(change.absoluteTargetPath, { force: true });
 		return;
 	}
 	await writeAtomic(change.absolutePath, change.before, change.mode);
 	if (change.absoluteTargetPath !== change.absolutePath) await rm(change.absoluteTargetPath, { force: true });
-}
-
-async function rollbackChange(change: PlannedFileChange): Promise<void> {
-	if (change.operation === "add") {
-		await rm(change.absoluteTargetPath, { force: true });
-		return;
-	}
-	if (!change.before) return;
-	await writeAtomic(change.absolutePath, change.before, change.mode);
-	if (change.operation === "move" && change.absoluteTargetPath !== change.absolutePath) {
-		await rm(change.absoluteTargetPath, { force: true });
-	}
 }
 
 async function withQueues<T>(paths: string[], index: number, callback: () => Promise<T>): Promise<T> {
@@ -335,7 +323,7 @@ export async function applyPatchPlan(plan: PatchPlan, signal?: AbortSignal): Pro
 			const rollbackFailures: string[] = [];
 			if (current) {
 				try {
-					await restoreCurrentChange(current);
+					await rollbackChange(current);
 				} catch (rollbackError) {
 					rollbackFailures.push(
 						`${current.targetPath}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,

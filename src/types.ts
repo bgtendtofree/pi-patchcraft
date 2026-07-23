@@ -48,6 +48,5 @@ export interface PatchPlan {
 }
 
 export interface ApplyPatchDetails {
-	stage: "validating" | "applying" | "done";
 	plan?: PatchPlan;
 }

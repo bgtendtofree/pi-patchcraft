@@ -107,7 +107,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "apply_patch",
 		label: "Apply Patch",
-		description: "Apply a Codex-format patch to add, update, move, or delete files inside the workspace.",
+		description: "Apply a Codex-format patch to add, update, move, or delete files.",
 		promptSnippet: "Add, update, move, or delete files with apply_patch",
 		promptGuidelines: [
 			"Use apply_patch for file edits when available, combining related multi-file changes in one patch.",
@@ -119,12 +119,12 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			if (!params.patch) throw new Error("patch is required");
 			onUpdate?.({
 				content: [{ type: "text", text: "Validating patch…" }],
-				details: { stage: "validating" } satisfies ApplyPatchDetails,
+				details: {} satisfies ApplyPatchDetails,
 			});
 			const plan = await planPatch(ctx.cwd, params.patch, signal);
 			onUpdate?.({
 				content: [{ type: "text", text: `Applying patch to ${plan.changes.length} file(s)…` }],
-				details: { stage: "applying", plan } satisfies ApplyPatchDetails,
+				details: { plan } satisfies ApplyPatchDetails,
 			});
 			await applyPatchPlan(plan, signal);
 			return {
@@ -141,7 +141,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 						].join("\n"),
 					},
 				],
-				details: { stage: "done", plan } satisfies ApplyPatchDetails,
+				details: { plan } satisfies ApplyPatchDetails,
 			};
 		},
 		renderShell: "self",
