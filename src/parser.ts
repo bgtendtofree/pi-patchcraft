@@ -1,28 +1,16 @@
 import type { PatchChunk, PatchOperation } from "./types.ts";
 
-export class PatchParseError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "PatchParseError";
-	}
-}
-
-function stripHeredoc(value: string): string {
-	const match = value.match(/^(?:cat\s+)?<<['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?\s*\n([\s\S]*?)\n\1\s*$/);
-	return match?.[2] ?? value;
-}
-
 function requirePath(value: string, header: string): string {
-	if (!value) throw new PatchParseError(`${header} requires a path`);
-	if (value.includes("\0")) throw new PatchParseError(`${header} path contains NUL`);
+	if (!value) throw new Error(`${header} requires a path`);
+	if (value.includes("\0")) throw new Error(`${header} path contains NUL`);
 	return value;
 }
 
 export function parsePatch(patchText: string): PatchOperation[] {
-	const normalized = stripHeredoc(patchText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim()).trim();
+	const normalized = patchText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 	const lines = normalized.split("\n");
 	if (lines[0]?.trim() !== "*** Begin Patch" || lines.at(-1)?.trim() !== "*** End Patch") {
-		throw new PatchParseError("Invalid patch format: expected *** Begin Patch ... *** End Patch envelope");
+		throw new Error("Invalid patch format: expected *** Begin Patch ... *** End Patch envelope");
 	}
 
 	const operations: PatchOperation[] = [];
@@ -43,12 +31,12 @@ export function parsePatch(patchText: string): PatchOperation[] {
 			while (index < endIndex && !(lines[index] ?? "").startsWith("*** ")) {
 				const contentLine = lines[index] ?? "";
 				if (!contentLine.startsWith("+")) {
-					throw new PatchParseError("Add File lines must start with '+'");
+					throw new Error("Add File lines must start with '+'");
 				}
 				content.push(contentLine.slice(1));
 				index++;
 			}
-			if (content.length === 0) throw new PatchParseError(`Add File '${filePath}' has no content lines`);
+			if (content.length === 0) throw new Error(`Add File '${filePath}' has no content lines`);
 			operations.push({ type: "add", path: filePath, content: `${content.join("\n")}\n` });
 			continue;
 		}
@@ -85,7 +73,7 @@ export function parsePatch(patchText: string): PatchOperation[] {
 						index++;
 						continue;
 					}
-					if (!marker.startsWith("@@ ")) throw new PatchParseError(`Invalid update marker: '${marker}'`);
+					if (!marker.startsWith("@@ ")) throw new Error(`Invalid update marker: '${marker}'`);
 					contexts.push(marker.slice(3));
 					index++;
 				}
@@ -97,7 +85,7 @@ export function parsePatch(patchText: string): PatchOperation[] {
 				while (index < endIndex) {
 					const changeLine = lines[index] ?? "";
 					if (changeLine === "*** End of File") {
-						if (parsedLines === 0) throw new PatchParseError("Update hunk has no change lines");
+						if (parsedLines === 0) throw new Error("Update hunk has no change lines");
 						endOfFile = true;
 						index++;
 						break;
@@ -111,17 +99,17 @@ export function parsePatch(patchText: string): PatchOperation[] {
 					} else if (prefix === "-") oldLines.push(value);
 					else if (prefix === "+") newLines.push(value);
 					else {
-						throw new PatchParseError(`Invalid update line: '${changeLine}'`);
+						throw new Error(`Invalid update line: '${changeLine}'`);
 					}
 					parsedLines++;
 					index++;
 				}
-				if (parsedLines === 0) throw new PatchParseError("Update hunk has no change lines");
+				if (parsedLines === 0) throw new Error("Update hunk has no change lines");
 				chunks.push({ contexts, oldLines, newLines, endOfFile });
 			}
 
 			if (chunks.length === 0 && moveTo === undefined) {
-				throw new PatchParseError(`Update File '${filePath}' is empty`);
+				throw new Error(`Update File '${filePath}' is empty`);
 			}
 			operations.push(
 				moveTo === undefined
@@ -131,9 +119,9 @@ export function parsePatch(patchText: string): PatchOperation[] {
 			continue;
 		}
 
-		throw new PatchParseError(`Unknown patch header: '${line}'`);
+		throw new Error(`Unknown patch header: '${line}'`);
 	}
 
-	if (operations.length === 0) throw new PatchParseError("Patch is empty");
+	if (operations.length === 0) throw new Error("Patch is empty");
 	return operations;
 }

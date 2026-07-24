@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { PatchParseError, parsePatch } from "../src/parser.ts";
+import { parsePatch } from "../src/parser.ts";
 
 describe("parsePatch", () => {
 	it("parses add, update, move, and delete operations", () => {
@@ -33,23 +33,25 @@ describe("parsePatch", () => {
 		]);
 	});
 
-	it("supports heredoc wrappers and EOF markers", () => {
-		const [operation] = parsePatch(`<<'PATCH'
-*** Begin Patch
+	it("supports EOF markers", () => {
+		const [operation] = parsePatch(`*** Begin Patch
 *** Update File: value.txt
 @@
 -old
 +new
 *** End of File
-*** End Patch
-PATCH`);
+*** End Patch`);
 		assert.equal(operation?.type, "update");
 		if (operation?.type !== "update") return;
 		assert.equal(operation.chunks[0]?.endOfFile, true);
 	});
 
 	it("rejects empty and malformed patches", () => {
-		assert.throws(() => parsePatch("*** Begin Patch\n*** End Patch"), PatchParseError);
+		assert.throws(() => parsePatch("*** Begin Patch\n*** End Patch"), /Patch is empty/);
+		assert.throws(
+			() => parsePatch("<<'PATCH'\n*** Begin Patch\n*** Delete File: a.txt\n*** End Patch\nPATCH"),
+			/Invalid patch format/,
+		);
 		assert.throws(
 			() => parsePatch("*** Begin Patch\n*** Add File: a.txt\ninvalid\n*** End Patch"),
 			/Add File lines must start/,
