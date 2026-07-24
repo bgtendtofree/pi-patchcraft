@@ -93,13 +93,13 @@ One run:
 pi -e git:github.com/bgtendtofree/pi-patchcraft
 ```
 
-For compact tool rows and transcript detail navigation, install Progressive Tools too:
+For compact tool rows and per-file native diff views in Transcript Navigator, install Progressive Tools too:
 
 ```bash
 pi install git:github.com/bgtendtofree/pi-progressive-tools
 ```
 
-Both extension load orders are supported through Progressive Tools provider protocol v1.
+Both extension load orders are supported through Progressive Tools provider protocol v1. Press `y` in Block Reader to copy the original transcript result. Result metadata stores diffs instead of full file snapshots.
 
 ## Development
 

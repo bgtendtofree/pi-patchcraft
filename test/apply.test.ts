@@ -37,6 +37,8 @@ describe("patch planning and application", () => {
 		assert.equal(plan.changes.length, 3);
 		assert.equal(plan.added, 2);
 		assert.equal(plan.removed, 2);
+		assert.match(plan.changes[1]?.displayDiff ?? "", /-1 before/);
+		assert.match(plan.changes[1]?.displayDiff ?? "", /\+1 after/);
 
 		await applyPatchPlan(plan);
 		assert.equal(await readFile(path.join(cwd, "nested/new.txt"), "utf8"), "created\n");

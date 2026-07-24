@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { applyPatchPlan, planPatch } from "./apply.ts";
 import { getProgressiveToolsAPI, patchcraftAdapter, registerProgressiveAdapter } from "./progressive.ts";
 import { renderPatchCall, renderPatchResult } from "./render.ts";
-import type { ApplyPatchDetails } from "./types.ts";
+import type { ApplyPatchDetails, PatchPlan, PatchResultDetails } from "./types.ts";
 
 const patchParameters = Type.Object({
 	patch: Type.String({
@@ -28,6 +28,23 @@ function normalizeArguments(args: unknown): { patch: string } {
 		if (typeof value === "string") return { patch: value };
 	}
 	return { patch: "" };
+}
+
+function resultDetails(plan: PatchPlan): PatchResultDetails {
+	return {
+		changes: plan.changes.map(({ operation, path, targetPath, displayDiff, added, removed, fuzz }) => ({
+			operation,
+			path,
+			targetPath,
+			displayDiff,
+			added,
+			removed,
+			fuzz,
+		})),
+		added: plan.added,
+		removed: plan.removed,
+		fuzz: plan.fuzz,
+	};
 }
 
 export default function piPatchcraft(pi: ExtensionAPI): void {
@@ -114,12 +131,12 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			if (!params.patch) throw new Error("patch is required");
 			onUpdate?.({
 				content: [{ type: "text", text: "Validating patch…" }],
-				details: {} satisfies ApplyPatchDetails,
+				details: undefined,
 			});
 			const plan = await planPatch(ctx.cwd, params.patch, signal);
 			onUpdate?.({
 				content: [{ type: "text", text: `Applying patch to ${plan.changes.length} file(s)…` }],
-				details: { plan } satisfies ApplyPatchDetails,
+				details: undefined,
 			});
 			await applyPatchPlan(plan, signal);
 			return {
@@ -136,7 +153,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 						].join("\n"),
 					},
 				],
-				details: { plan } satisfies ApplyPatchDetails,
+				details: resultDetails(plan),
 			};
 		},
 		renderShell: "self",

@@ -14,7 +14,10 @@ describe("Patchcraft Progressive Tools adapter", () => {
 			patchcraftAdapter.summarize?.({
 				isError: false,
 				details: {
-					plan: { changes: [{}], added: 1, removed: 1, fuzz: 0 },
+					changes: [{}],
+					added: 1,
+					removed: 1,
+					fuzz: 0,
 				},
 			}),
 			{ metrics: ["1 file", "+1", "-1"] },
@@ -49,10 +52,46 @@ describe("Patchcraft Progressive Tools adapter", () => {
 			patchcraftAdapter.summarize?.({
 				isError: false,
 				details: {
-					plan: { changes: [{}], added: 2, removed: 0, fuzz: 0 },
+					changes: [{}],
+					added: 2,
+					removed: 0,
+					fuzz: 0,
 				},
 			}),
 			{ metrics: ["1 file", "+2"] },
 		);
+	});
+
+	it("provides native diff sections without changing copy behavior", () => {
+		const detail = patchcraftAdapter.detail?.({
+			isError: false,
+			details: {
+				added: 1,
+				removed: 1,
+				fuzz: 0,
+				changes: [
+					{
+						operation: "update",
+						path: "src/a.ts",
+						targetPath: "src/a.ts",
+						added: 1,
+						removed: 1,
+						fuzz: 0,
+						displayDiff: "-1 old\n+1 new",
+					},
+				],
+			},
+		});
+
+		assert.deepEqual(detail, {
+			sections: [
+				{
+					title: "Update src/a.ts (+1 -1)",
+					text: "-1 old\n+1 new",
+					format: "diff",
+				},
+			],
+			hideMetadata: true,
+		});
 	});
 });

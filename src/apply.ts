@@ -1,6 +1,6 @@
 import { chmod, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { generateUnifiedPatch, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { generateDiffString, generateUnifiedPatch, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { parsePatch } from "./parser.ts";
 import { resolvePatchPath } from "./paths.ts";
 import type { PatchChunk, PatchPlan, PlannedFileChange } from "./types.ts";
@@ -146,11 +146,12 @@ function countDiff(diff: string): { added: number; removed: number } {
 	return { added, removed };
 }
 
-function createChange(input: Omit<PlannedFileChange, "diff" | "added" | "removed">): PlannedFileChange {
+function createChange(input: Omit<PlannedFileChange, "diff" | "displayDiff" | "added" | "removed">): PlannedFileChange {
 	const before = input.before?.toString("utf8") ?? "";
 	const after = input.after?.toString("utf8") ?? "";
 	const diff = generateUnifiedPatch(input.path, before, after);
-	return { ...input, diff, ...countDiff(diff) };
+	const displayDiff = generateDiffString(before, after).diff;
+	return { ...input, diff, displayDiff, ...countDiff(diff) };
 }
 
 function assertUniqueChanges(changes: PlannedFileChange[]): void {

@@ -1,5 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
-import type { PatchPlan } from "./types.ts";
+import type { PatchPlan, PatchResultDetails } from "./types.ts";
 
 const API_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/api/v1");
 const PENDING_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/pending/v1");
@@ -15,12 +15,24 @@ interface ProgressiveToolResultView {
 	isError: boolean;
 }
 
+interface ProgressiveToolDetailSection {
+	title?: string;
+	text: string;
+	format?: "diff" | "text";
+}
+
+interface ProgressiveToolDetail {
+	sections: ProgressiveToolDetailSection[];
+	hideMetadata?: boolean;
+}
+
 export interface ProgressiveToolAdapter {
 	version: 1;
 	id: string;
 	toolNames: string[];
 	title(args: unknown): ProgressiveToolTitle;
 	summarize?(result: ProgressiveToolResultView): { status?: string; metrics?: string[] };
+	detail?(result: ProgressiveToolResultView): ProgressiveToolDetail | undefined;
 }
 
 interface ProgressiveToolsAPI {
@@ -79,9 +91,21 @@ function patchHeaders(value: unknown): PatchHeader[] {
 	return headers;
 }
 
-function isPatchPlan(value: unknown): value is PatchPlan {
+function isPatchDetails(value: unknown): value is PatchPlan | PatchResultDetails {
 	const record = asRecord(value);
 	return Array.isArray(record.changes) && typeof record.added === "number" && typeof record.removed === "number";
+}
+
+export function getPatchDetails(value: unknown): PatchPlan | PatchResultDetails | undefined {
+	const details = asRecord(value);
+	if (isPatchDetails(details)) return details;
+	return isPatchDetails(details.plan) ? details.plan : undefined;
+}
+
+function changeTitle(change: PatchPlan["changes"][number] | PatchResultDetails["changes"][number]): string {
+	const operation = change.operation[0]?.toUpperCase() + change.operation.slice(1);
+	const target = change.operation === "move" ? `${change.path} → ${change.targetPath}` : change.targetPath;
+	return `${operation} ${target} (+${change.added} -${change.removed})`;
 }
 
 export const patchcraftAdapter: ProgressiveToolAdapter = {
@@ -112,15 +136,28 @@ export const patchcraftAdapter: ProgressiveToolAdapter = {
 		return { verb: "Update", subject: header.path };
 	},
 	summarize(view) {
-		const details = asRecord(view.details);
-		const plan = details.plan;
-		if (!isPatchPlan(plan)) return view.isError ? { status: "failed" } : {};
+		const plan = getPatchDetails(view.details);
+		if (!plan) return view.isError ? { status: "failed" } : {};
 		const fileCount = plan.changes.length;
 		const metrics = [`${fileCount} ${fileCount === 1 ? "file" : "files"}`];
 		if (plan.added > 0) metrics.push(`+${plan.added}`);
 		if (plan.removed > 0) metrics.push(`-${plan.removed}`);
 		if (plan.fuzz > 0) metrics.push(`fuzz ${plan.fuzz}`);
 		return { metrics };
+	},
+	detail(view) {
+		const plan = getPatchDetails(view.details);
+		if (!plan) return undefined;
+		const sections = plan.changes.flatMap((change) =>
+			typeof change.displayDiff === "string"
+				? [{ title: changeTitle(change), text: change.displayDiff, format: "diff" as const }]
+				: [],
+		);
+		if (sections.length === 0) return undefined;
+		return {
+			sections,
+			hideMetadata: true,
+		};
 	},
 };
 

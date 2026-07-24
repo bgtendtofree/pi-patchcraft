@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import piPatchcraft from "../src/index.ts";
+import type { ApplyPatchDetails } from "../src/types.ts";
 
 interface RegisteredTool {
 	name: string;
@@ -15,7 +16,7 @@ interface RegisteredTool {
 		signal: AbortSignal | undefined,
 		onUpdate: undefined,
 		ctx: { cwd: string },
-	): Promise<{ content: Array<{ type: string; text: string }> }>;
+	): Promise<{ content: Array<{ type: string; text: string }>; details: ApplyPatchDetails }>;
 }
 
 interface RegisteredCommand {
@@ -86,6 +87,21 @@ describe("pi-patchcraft extension", () => {
 			{ cwd },
 		);
 		assert.match(result?.content[0]?.text ?? "", /Patch applied to 1 file/);
+		const details = result?.details;
+		assert.ok(details && "changes" in details);
+		assert.deepEqual(Object.keys(details).sort(), ["added", "changes", "fuzz", "removed"]);
+		const change = details.changes[0];
+		assert.deepEqual(Object.keys(change ?? {}).sort(), [
+			"added",
+			"displayDiff",
+			"fuzz",
+			"operation",
+			"path",
+			"removed",
+			"targetPath",
+		]);
+		assert.equal("before" in (change ?? {}), false);
+		assert.equal("after" in (change ?? {}), false);
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
 	});
 
