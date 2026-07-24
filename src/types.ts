@@ -34,7 +34,6 @@ export interface PlannedFileChange {
 	before: Buffer | undefined;
 	after: Buffer | undefined;
 	mode: number | undefined;
-	diff: string;
 	displayDiff: string;
 	added: number;
 	removed: number;
@@ -65,9 +64,4 @@ export interface PatchResultDetails {
 	fuzz: number;
 }
 
-export type ApplyPatchDetails =
-	| PatchResultDetails
-	| {
-			/** Legacy session compatibility. */
-			plan?: PatchPlan;
-	  };
+export type ApplyPatchDetails = PatchResultDetails;

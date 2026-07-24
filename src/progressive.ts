@@ -1,5 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
-import type { PatchPlan, PatchResultDetails } from "./types.ts";
+import type { PatchResultDetails } from "./types.ts";
 
 const API_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/api/v1");
 const PENDING_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/pending/v1");
@@ -91,18 +91,16 @@ function patchHeaders(value: unknown): PatchHeader[] {
 	return headers;
 }
 
-function isPatchDetails(value: unknown): value is PatchPlan | PatchResultDetails {
+function isPatchDetails(value: unknown): value is PatchResultDetails {
 	const record = asRecord(value);
 	return Array.isArray(record.changes) && typeof record.added === "number" && typeof record.removed === "number";
 }
 
-export function getPatchDetails(value: unknown): PatchPlan | PatchResultDetails | undefined {
-	const details = asRecord(value);
-	if (isPatchDetails(details)) return details;
-	return isPatchDetails(details.plan) ? details.plan : undefined;
+export function getPatchDetails(value: unknown): PatchResultDetails | undefined {
+	return isPatchDetails(value) ? value : undefined;
 }
 
-function changeTitle(change: PatchPlan["changes"][number] | PatchResultDetails["changes"][number]): string {
+function changeTitle(change: PatchResultDetails["changes"][number]): string {
 	const operation = change.operation[0]?.toUpperCase() + change.operation.slice(1);
 	const target = change.operation === "move" ? `${change.path} → ${change.targetPath}` : change.targetPath;
 	return `${operation} ${target} (+${change.added} -${change.removed})`;

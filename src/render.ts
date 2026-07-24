@@ -28,7 +28,7 @@ export function renderPatchResult(
 		const title = change.operation === "move" ? `${change.path} → ${change.targetPath}` : change.targetPath;
 		return [
 			theme.fg("accent", `${change.operation} ${title} (+${change.added} -${change.removed})`),
-			...renderDiff(change.displayDiff || ("diff" in change ? change.diff : ""))
+			...renderDiff(change.displayDiff)
 				.split("\n")
 				.filter((line) => line.length > 0)
 				.slice(0, 20),
