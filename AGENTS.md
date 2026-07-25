@@ -8,14 +8,14 @@ Patchcraft provides Pi with a transactional Codex-style `apply_patch` tool. Pres
 
 ## Stack
 
-- Runtime: Node.js 24 through Pi
-- Development tooling: Bun 1.3.14
+- Runtime: Node.js `>=24` through Pi
+- Development tooling: Node.js 24.18.0 through project mise config and npm
 - TypeScript 7, strict mode, ES2024
 - Formatting and linting: Biome
 - Tests: Node.js `node:test`
-- Pi development baseline: `@earendil-works/pi-coding-agent` 0.80.10
+- Pi development baseline: `@earendil-works/pi-coding-agent` 0.82.0
 
-Do not use Bun runtime APIs in extension source. Pi loads the TypeScript files directly.
+Pi loads the TypeScript files directly. Runtime source and tests use separate TypeScript configs.
 
 ## Layout
 
@@ -94,16 +94,19 @@ Preserve fuzz accounting. Prefer failure over adding broader or ambiguous matchi
 ## Commands
 
 ```bash
-bun install
-bun run quality
-bun run typecheck
-bun run test
-bun run test:coverage
-bun run smoke
-bun run ci
+mise install
+npm ci
+npm run quality
+npm run typecheck
+npm test
+npm run test:coverage
+npm run smoke
+npm run package:check
+npm run smoke:package
+npm run ci
 ```
 
-Use `bun run validate` for normal source changes. Use full `bun run ci` before release or after changes to Pi integration, runtime dependencies, transaction behavior, or CI scripts. Run `npm pack --dry-run` separately before an npm release.
+Use `npm run validate` for normal source changes. Use full `npm run ci` before release or after changes to Pi integration, runtime dependencies, transaction behavior, or CI scripts.
 
 Local Pi smoke test:
 

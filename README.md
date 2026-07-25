@@ -103,16 +103,19 @@ Both extension load orders are supported through Progressive Tools provider prot
 
 ## Development
 
-Bun is development tooling. Runtime remains Node.js through Pi.
+Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.18.0 with Pi 0.82.0.
 
 ```bash
-bun install
-bun run quality
-bun run typecheck
-bun run test
-bun run test:coverage
-bun run smoke
-bun run ci
+mise install
+npm ci
+npm run quality
+npm run typecheck
+npm test
+npm run test:coverage
+npm run smoke
+npm run package:check
+npm run smoke:package
+npm run ci
 ```
 
 Load local source:
@@ -126,9 +129,9 @@ pi -e ./src/index.ts
 
 Development and package smoke tests pin:
 
-- Node.js 24
-- Bun 1.3.14
-- Pi 0.80.10
+- Node.js 24.18.0 through mise
+- npm locked dependencies
+- Pi 0.82.0
 - TypeScript 7
 
 Pi runtime dependencies remain `"*"` peer dependencies.
