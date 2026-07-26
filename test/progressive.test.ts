@@ -8,7 +8,7 @@ describe("Patchcraft Progressive Tools adapter", () => {
 			patchcraftAdapter.title({
 				patch: "*** Begin Patch\n*** Update File: a.ts\n@@\n-a\n+b\n*** End Patch",
 			}),
-			{ verb: "Update", subject: "a.ts" },
+			{ verb: "Update", subject: "a.ts", elide: "middle", accentSubject: true },
 		);
 		assert.deepEqual(
 			patchcraftAdapter.summarize?.({
@@ -28,16 +28,20 @@ describe("Patchcraft Progressive Tools adapter", () => {
 		assert.deepEqual(patchcraftAdapter.title({ patch: "*** Begin Patch\n*** Add File: new.ts\n+x\n*** End Patch" }), {
 			verb: "Add",
 			subject: "new.ts",
+			elide: "middle",
+			accentSubject: true,
 		});
 		assert.deepEqual(patchcraftAdapter.title({ patch: "*** Begin Patch\n*** Delete File: old.ts\n*** End Patch" }), {
 			verb: "Delete",
 			subject: "old.ts",
+			elide: "middle",
+			accentSubject: true,
 		});
 		assert.deepEqual(
 			patchcraftAdapter.title({
 				patch: "*** Begin Patch\n*** Update File: old.ts\n*** Move to: new.ts\n@@\n-old\n+new\n*** End Patch",
 			}),
-			{ verb: "Move", subject: "old.ts → new.ts" },
+			{ verb: "Move", subject: "old.ts → new.ts", elide: "middle", accentSubject: true },
 		);
 		assert.deepEqual(
 			patchcraftAdapter.title({

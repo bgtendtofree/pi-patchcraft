@@ -1,13 +1,15 @@
 import type { Component } from "@earendil-works/pi-tui";
 import type { PatchResultDetails } from "./types.ts";
 
-const API_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/api/v1");
-const PENDING_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/pending/v1");
+const API_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/api/v2");
+const PENDING_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/pending/v2");
 
 interface ProgressiveToolTitle {
 	verb: string;
 	subject?: string;
 	context?: string;
+	elide?: "end" | "middle";
+	accentSubject?: boolean;
 }
 
 interface ProgressiveToolResultView {
@@ -27,7 +29,7 @@ interface ProgressiveToolDetail {
 }
 
 export interface ProgressiveToolAdapter {
-	version: 1;
+	version: 2;
 	id: string;
 	toolNames: string[];
 	title(args: unknown): ProgressiveToolTitle;
@@ -36,7 +38,7 @@ export interface ProgressiveToolAdapter {
 }
 
 interface ProgressiveToolsAPI {
-	version: 1;
+	version: 2;
 	registerAdapter(adapter: ProgressiveToolAdapter): () => void;
 	renderCall(adapter: ProgressiveToolAdapter, args: unknown, theme: unknown, context: unknown): Component;
 	renderResult(
@@ -106,8 +108,13 @@ function changeTitle(change: PatchResultDetails["changes"][number]): string {
 	return `${operation} ${target} (+${change.added} -${change.removed})`;
 }
 
+/** Paths keep both ends when the row is narrow; the tail carries the file name. */
+function pathTitle(verb: string, subject: string): ProgressiveToolTitle {
+	return { verb, subject, elide: "middle", accentSubject: true };
+}
+
 export const patchcraftAdapter: ProgressiveToolAdapter = {
-	version: 1,
+	version: 2,
 	id: "@bgtendtofree/pi-patchcraft/apply-patch",
 	toolNames: ["apply_patch"],
 	title(args) {
@@ -126,12 +133,12 @@ export const patchcraftAdapter: ProgressiveToolAdapter = {
 
 		const header = headers[0];
 		if (!header) return { verb: "Patch", subject: "…" };
-		if (header.operation === "add") return { verb: "Add", subject: header.path };
-		if (header.operation === "delete") return { verb: "Delete", subject: header.path };
+		if (header.operation === "add") return pathTitle("Add", header.path);
+		if (header.operation === "delete") return pathTitle("Delete", header.path);
 		if (header.operation === "move") {
-			return { verb: "Move", subject: `${header.path} → ${header.targetPath ?? "…"}` };
+			return pathTitle("Move", `${header.path} → ${header.targetPath ?? "…"}`);
 		}
-		return { verb: "Update", subject: header.path };
+		return pathTitle("Update", header.path);
 	},
 	summarize(view) {
 		const plan = getPatchDetails(view.details);
@@ -161,7 +168,7 @@ export const patchcraftAdapter: ProgressiveToolAdapter = {
 
 export function getProgressiveToolsAPI(): ProgressiveToolsAPI | undefined {
 	const api = (globalThis as ProtocolGlobal)[API_KEY];
-	return api?.version === 1 ? api : undefined;
+	return api?.version === 2 ? api : undefined;
 }
 
 export function registerProgressiveAdapter(adapter: ProgressiveToolAdapter): void {
