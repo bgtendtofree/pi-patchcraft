@@ -130,3 +130,13 @@ pi -e ./src/index.ts
 - Keep Pi-provided packages as `"*"` peer dependencies and exact versions in dev dependencies.
 - Update README when installation, compatibility, public behavior, or safety semantics change.
 - Stage only intended files. Do not use `git add -A`, force-push, bypass hooks, or rewrite shared history.
+
+<!-- pi-ci-standard:validation:start -->
+## Validation
+
+CI contract for this repository (managed by pi-ci-standard — regenerate with `pi-ci init`):
+
+- Run `mise run check` while iterating; fix all failures before continuing.
+- Run `mise run ci` before declaring work complete; it must pass.
+- GitHub Actions calls only `mise run ci`. Never add language-specific check commands to workflows.
+<!-- pi-ci-standard:validation:end -->

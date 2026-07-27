@@ -1,3 +1,4 @@
+# Managed by pi-ci-standard — regenerate with: pi-ci init
 name: CI
 
 on:
@@ -13,8 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Node 24.18.0 / Pi 0.82.0
+  ci:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -24,22 +24,5 @@ jobs:
       - name: Setup toolchain
         uses: jdx/mise-action@v4
 
-      - name: Show toolchain
-        run: |
-          mise --version
-          node --version
-          npm --version
-
-      - name: Install locked dependencies
-        run: npm ci
-
-      - name: Run full verification
-        run: npm run ci
-
-      - name: Upload coverage
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-lcov
-          path: coverage/lcov.info
-          if-no-files-found: ignore
+      - name: Run CI gate
+        run: mise run ci
