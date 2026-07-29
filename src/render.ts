@@ -1,7 +1,7 @@
 import { renderDiff, type Theme } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { getPatchDetails, patchcraftAdapter } from "./progressive.ts";
-import type { ApplyPatchDetails } from "./types.ts";
+import type { PatchResultDetails } from "./types.ts";
 
 interface PatchArgs {
 	patch: string;
@@ -13,7 +13,7 @@ export function renderPatchCall(args: PatchArgs, theme: Theme): Text {
 }
 
 export function renderPatchResult(
-	result: { content: Array<{ type: string; text?: string }>; details: ApplyPatchDetails | undefined },
+	result: { content: Array<{ type: string; text?: string }>; details: PatchResultDetails | undefined },
 	options: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
 ): Container | Text {

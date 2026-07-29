@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import piPatchcraft from "../src/index.ts";
-import type { ApplyPatchDetails } from "../src/types.ts";
+import type { PatchResultDetails } from "../src/types.ts";
 
 interface RegisteredTool {
 	name: string;
@@ -16,7 +16,7 @@ interface RegisteredTool {
 		signal: AbortSignal | undefined,
 		onUpdate: undefined,
 		ctx: { cwd: string },
-	): Promise<{ content: Array<{ type: string; text: string }>; details: ApplyPatchDetails }>;
+	): Promise<{ content: Array<{ type: string; text: string }>; details: PatchResultDetails }>;
 }
 
 interface RegisteredCommand {

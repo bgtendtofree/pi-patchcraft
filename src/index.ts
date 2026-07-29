@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { applyPatchPlan, planPatch } from "./apply.ts";
 import { getProgressiveToolsAPI, patchcraftAdapter, registerProgressiveAdapter } from "./progressive.ts";
 import { renderPatchCall, renderPatchResult } from "./render.ts";
-import type { ApplyPatchDetails, PatchPlan, PatchResultDetails } from "./types.ts";
+import type { PatchPlan, PatchResultDetails } from "./types.ts";
 
 const patchParameters = Type.Object({
 	patch: Type.String({
@@ -166,7 +166,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			return api
 				? api.renderResult(patchcraftAdapter, result, options, theme, context)
 				: renderPatchResult(
-						{ content: result.content, details: result.details as ApplyPatchDetails | undefined },
+						{ content: result.content, details: result.details as PatchResultDetails | undefined },
 						options,
 						theme,
 					);

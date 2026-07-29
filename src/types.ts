@@ -47,15 +47,10 @@ export interface PatchPlan {
 	fuzz: number;
 }
 
-export interface PatchResultChange {
-	operation: PlannedFileChange["operation"];
-	path: string;
-	targetPath: string;
-	displayDiff: string;
-	added: number;
-	removed: number;
-	fuzz: number;
-}
+export type PatchResultChange = Pick<
+	PlannedFileChange,
+	"operation" | "path" | "targetPath" | "displayDiff" | "added" | "removed" | "fuzz"
+>;
 
 export interface PatchResultDetails {
 	changes: PatchResultChange[];
@@ -63,5 +58,3 @@ export interface PatchResultDetails {
 	removed: number;
 	fuzz: number;
 }
-
-export type ApplyPatchDetails = PatchResultDetails;

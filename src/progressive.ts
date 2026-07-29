@@ -1,4 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
+import { parsePatch } from "./parser.ts";
 import type { PatchResultDetails } from "./types.ts";
 
 const API_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/api/v2");
@@ -69,37 +70,23 @@ function patchHeaders(value: unknown): PatchHeader[] {
 	const values = asRecord(value);
 	const patch = [values.patch, values.input, values.patchText].find((candidate) => typeof candidate === "string");
 	if (typeof patch !== "string") return [];
-	const lines = patch.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-	const headers: PatchHeader[] = [];
-	for (let index = 0; index < lines.length; index++) {
-		const line = lines[index] ?? "";
-		if (line.startsWith("*** Add File: ")) {
-			headers.push({ operation: "add", path: line.slice("*** Add File: ".length) });
-			continue;
-		}
-		if (line.startsWith("*** Delete File: ")) {
-			headers.push({ operation: "delete", path: line.slice("*** Delete File: ".length) });
-			continue;
-		}
-		if (!line.startsWith("*** Update File: ")) continue;
-		const path = line.slice("*** Update File: ".length);
-		const next = lines[index + 1] ?? "";
-		if (next.startsWith("*** Move to: ")) {
-			headers.push({ operation: "move", path, targetPath: next.slice("*** Move to: ".length) });
-			continue;
-		}
-		headers.push({ operation: "update", path });
+	try {
+		return parsePatch(patch).map((operation): PatchHeader => {
+			if (operation.type !== "update") return { operation: operation.type, path: operation.path };
+			if (operation.moveTo === undefined) return { operation: "update", path: operation.path };
+			return { operation: "move", path: operation.path, targetPath: operation.moveTo };
+		});
+	} catch {
+		return [];
 	}
-	return headers;
-}
-
-function isPatchDetails(value: unknown): value is PatchResultDetails {
-	const record = asRecord(value);
-	return Array.isArray(record.changes) && typeof record.added === "number" && typeof record.removed === "number";
 }
 
 export function getPatchDetails(value: unknown): PatchResultDetails | undefined {
-	return isPatchDetails(value) ? value : undefined;
+	const record = asRecord(value);
+	if (Array.isArray(record.changes) && typeof record.added === "number" && typeof record.removed === "number") {
+		return value as PatchResultDetails;
+	}
+	return undefined;
 }
 
 function changeTitle(change: PatchResultDetails["changes"][number]): string {

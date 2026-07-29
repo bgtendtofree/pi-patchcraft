@@ -21,10 +21,6 @@ interface SplitContent {
 	hasFinalLineEnding: boolean;
 }
 
-function throwIfAborted(signal?: AbortSignal): void {
-	if (signal?.aborted) throw new Error("Operation aborted");
-}
-
 function normalizeLine(value: string): string {
 	return value
 		.normalize("NFKC")
@@ -49,14 +45,9 @@ function findSequence(lines: string[], pattern: string[], start: number, eof: bo
 	for (const variant of variants) {
 		const expected = pattern.map(variant.prepare);
 		for (let index = first; index <= last; index++) {
-			let matches = true;
-			for (let offset = 0; offset < expected.length; offset++) {
-				if (variant.prepare(lines[index + offset] ?? "") !== expected[offset]) {
-					matches = false;
-					break;
-				}
+			if (expected.every((value, offset) => variant.prepare(lines[index + offset] ?? "") === value)) {
+				return { index, fuzz: variant.fuzz };
 			}
-			if (matches) return { index, fuzz: variant.fuzz };
 		}
 	}
 	return undefined;
@@ -129,21 +120,16 @@ async function readState(absolutePath: string): Promise<FileState | undefined> {
 	}
 }
 
-function countDiff(displayDiff: string): { added: number; removed: number } {
-	let added = 0;
-	let removed = 0;
-	for (const line of displayDiff.split("\n")) {
-		if (line.startsWith("+")) added++;
-		else if (line.startsWith("-")) removed++;
-	}
-	return { added, removed };
-}
-
 function createChange(input: Omit<PlannedFileChange, "displayDiff" | "added" | "removed">): PlannedFileChange {
 	const before = input.before?.toString("utf8") ?? "";
 	const after = input.after?.toString("utf8") ?? "";
 	const displayDiff = generateDiffString(before, after).diff;
-	return { ...input, displayDiff, ...countDiff(displayDiff) };
+	return {
+		...input,
+		displayDiff,
+		added: (displayDiff.match(/^\+/gm) ?? []).length,
+		removed: (displayDiff.match(/^-/gm) ?? []).length,
+	};
 }
 
 function assertUniqueChanges(changes: PlannedFileChange[]): void {
@@ -157,12 +143,12 @@ function assertUniqueChanges(changes: PlannedFileChange[]): void {
 }
 
 export async function planPatch(cwd: string, patchText: string, signal?: AbortSignal): Promise<PatchPlan> {
-	throwIfAborted(signal);
+	signal?.throwIfAborted();
 	const operations = parsePatch(patchText);
 	const changes: PlannedFileChange[] = [];
 
 	for (const operation of operations) {
-		throwIfAborted(signal);
+		signal?.throwIfAborted();
 		const absolutePath = await resolvePatchPath(cwd, operation.path);
 		const state = await readState(absolutePath);
 
@@ -299,14 +285,14 @@ export async function applyPatchPlan(plan: PatchPlan, signal?: AbortSignal): Pro
 	const paths = [...new Set(plan.changes.flatMap((change) => [change.absolutePath, change.absoluteTargetPath]))].sort();
 
 	await withQueues(paths, 0, async () => {
-		throwIfAborted(signal);
+		signal?.throwIfAborted();
 		await validatePlanState(plan);
 		const applied: PlannedFileChange[] = [];
 		let current: PlannedFileChange | undefined;
 		try {
 			for (const change of plan.changes) {
 				current = change;
-				throwIfAborted(signal);
+				signal?.throwIfAborted();
 				await applyChange(change);
 				applied.push(change);
 				current = undefined;
