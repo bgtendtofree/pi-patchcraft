@@ -7,6 +7,14 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const PI_VERSION = manifest.devDependencies["@earendil-works/pi-coding-agent"];
+// Guard: extension entry points must exist and ship in the tarball; a missing file breaks the installed extension silently.
+for (const entry of manifest.pi?.extensions ?? []) {
+	const rel = entry.replace(/^\.\//, "");
+	if (!existsSync(join(root, rel))) throw new Error(`pi.extensions entry missing on disk: ${rel}`);
+	if (!manifest.files.includes(rel) && !manifest.files.includes(rel.split("/")[0])) {
+		throw new Error(`package.json files does not ship ${rel}`);
+	}
+}
 using workspace = mkdtempDisposableSync(join(tmpdir(), "pi-package-smoke-"));
 const packDirectory = join(workspace.path, "pack");
 const hostDirectory = join(workspace.path, "host");
