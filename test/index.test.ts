@@ -67,6 +67,8 @@ describe("pi-patchcraft extension", () => {
 			},
 		);
 		assert.deepEqual(activeTools, ["read", "bash", "apply_patch"]);
+		handlers.get("model_select")?.({}, { model: { id: "openai/gpt-5.6-luna", provider: "openrouter" } });
+		assert.deepEqual(activeTools, ["read", "bash", "apply_patch"]);
 		activeTools.splice(2, 0, "external_tool");
 		handlers.get("model_select")?.({}, { model: { id: "claude-sonnet-4", provider: "anthropic" } });
 		assert.deepEqual(activeTools, ["read", "edit", "write", "bash", "external_tool"]);

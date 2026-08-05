@@ -54,7 +54,8 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	function wantsPatchcraft(ctx: ExtensionContext): boolean {
 		if (mode === "on") return true;
 		if (mode === "off") return false;
-		return (ctx.model?.id.toLowerCase() ?? "").startsWith("gpt-");
+		const id = ctx.model?.id.toLowerCase() ?? "";
+		return id.split("/").pop()?.startsWith("gpt-") ?? false;
 	}
 
 	function restoreMode(ctx: ExtensionContext): void {
