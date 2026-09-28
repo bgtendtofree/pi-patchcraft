@@ -95,7 +95,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			if (!next.includes(name)) next.push(name);
 		}
 		if (usePatchcraft && !next.includes("apply_patch")) next.push("apply_patch");
-		pi.setActiveTools(next);
+		if (next.length !== current.length || next.some((name, index) => name !== current[index])) pi.setActiveTools(next);
 	}
 
 	registerProgressiveAdapter(patchcraftAdapter);

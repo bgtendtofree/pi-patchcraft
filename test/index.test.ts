@@ -41,6 +41,7 @@ describe("pi-patchcraft extension", () => {
 		let tool: RegisteredTool | undefined;
 		const handlers = new Map<string, (event: unknown, ctx: unknown) => void>();
 		let activeTools = ["read", "edit", "write", "bash"];
+		let toolSwitches = 0;
 		const pi = {
 			registerTool(value: RegisteredTool) {
 				tool = value;
@@ -52,6 +53,7 @@ describe("pi-patchcraft extension", () => {
 				return [...activeTools];
 			},
 			setActiveTools(names: string[]) {
+				toolSwitches++;
 				activeTools = [...names];
 			},
 			registerCommand() {},
@@ -67,13 +69,18 @@ describe("pi-patchcraft extension", () => {
 			},
 		);
 		assert.deepEqual(activeTools, ["read", "bash", "apply_patch"]);
+		assert.equal(toolSwitches, 1);
 		handlers.get("model_select")?.({}, { model: { id: "openai/gpt-5.6-luna", provider: "openrouter" } });
+		handlers.get("before_agent_start")?.({}, { model: { id: "gpt-5", provider: "openai" } });
 		assert.deepEqual(activeTools, ["read", "bash", "apply_patch"]);
+		assert.equal(toolSwitches, 1);
 		activeTools.splice(2, 0, "external_tool");
 		handlers.get("model_select")?.({}, { model: { id: "claude-sonnet-4", provider: "anthropic" } });
 		assert.deepEqual(activeTools, ["read", "edit", "write", "bash", "external_tool"]);
+		assert.equal(toolSwitches, 2);
 		handlers.get("model_select")?.({}, { model: { id: "codex-platform-model", provider: "custom" } });
 		assert.deepEqual(activeTools, ["read", "edit", "write", "bash", "external_tool"]);
+		assert.equal(toolSwitches, 2);
 
 		assert.deepEqual(tool?.prepareArguments?.({ input: "patch" }), { patch: "patch" });
 		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-tool-"));
