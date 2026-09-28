@@ -57,7 +57,7 @@ function splitContent(content: string): SplitContent {
 	const matchedLineEnding = content.match(/\r\n|\r|\n/)?.[0];
 	const lineEnding = matchedLineEnding === "\r\n" || matchedLineEnding === "\r" ? matchedLineEnding : "\n";
 	const hasFinalLineEnding = /(?:\r\n|\r|\n)$/.test(content);
-	const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+	const lines = content === "" ? [] : content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 	if (hasFinalLineEnding) lines.pop();
 	return { lines, lineEnding, hasFinalLineEnding };
 }

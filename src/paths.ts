@@ -1,8 +1,9 @@
+import { realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export function resolvePatchPath(cwd: string, input: string): string {
+export async function resolvePatchPath(cwd: string, input: string): Promise<string> {
 	let value = input.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
 	if (value.startsWith("@")) value = value.slice(1);
 	if (!value) throw new Error("Patch path is empty");
@@ -12,5 +13,18 @@ export function resolvePatchPath(cwd: string, input: string): string {
 		value = path.join(os.homedir(), value.slice(2));
 	}
 	if (value.startsWith("file://")) value = fileURLToPath(value);
-	return path.resolve(cwd, value);
+	const absolute = path.resolve(cwd, value);
+	let parent = path.dirname(absolute);
+	while (true) {
+		try {
+			return path.join(await realpath(parent), path.relative(parent, path.dirname(absolute)), path.basename(absolute));
+		} catch (error) {
+			if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "ENOENT") {
+				throw error;
+			}
+			const next = path.dirname(parent);
+			if (next === parent) throw error;
+			parent = next;
+		}
+	}
 }

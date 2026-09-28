@@ -89,6 +89,15 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(target, "utf8"), "base\nfirst\nsecond\n");
 	});
 
+	it("inserts into an empty file without a leading newline", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "empty.txt");
+		await writeFile(target, "");
+		const plan = await planPatch(cwd, "*** Begin Patch\n*** Update File: empty.txt\n@@\n+hello\n*** End Patch");
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(target, "utf8"), "hello");
+	});
+
 	it("preserves line endings and final newline state", async () => {
 		const cwd = await workspace();
 		const crlfTarget = path.join(cwd, "crlf.txt");
@@ -136,6 +145,20 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(parent, "utf8"), "parent\n");
 		assert.equal(await readFile(path.join(outside, "symlink.txt"), "utf8"), "symlink\n");
 		await rm(parent);
+	});
+
+	it("rejects operations targeting the same file through a symlinked parent", async () => {
+		const cwd = await workspace();
+		await mkdir(path.join(cwd, "real"));
+		await symlink(path.join(cwd, "real"), path.join(cwd, "alias"), process.platform === "win32" ? "junction" : "dir");
+		const patch = `*** Begin Patch
+*** Add File: real/nested/new.txt
++first
+*** Add File: alias/nested/new.txt
++second
+*** End Patch`;
+		await assert.rejects(planPatch(cwd, patch), /conflicting operations/);
+		await assert.rejects(readFile(path.join(cwd, "real/nested/new.txt")));
 	});
 
 	it("rejects precondition failures and conflicting paths", async () => {

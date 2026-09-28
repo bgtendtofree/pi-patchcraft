@@ -13,7 +13,7 @@ Patchcraft provides Pi with a transactional Codex-style `apply_patch` tool. Pres
 - TypeScript 7, strict mode, ES2024
 - Formatting and linting: Biome
 - Tests: Node.js `node:test`
-- Pi development baseline: `@earendil-works/pi-coding-agent` 0.82.0
+- Pi development baseline: `@earendil-works/pi-coding-agent` 0.87.1
 
 Pi loads the TypeScript files directly. Runtime source and tests use separate TypeScript configs.
 

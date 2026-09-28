@@ -70,6 +70,7 @@ Patchcraft intentionally fails instead of guessing:
 - Move target must not exist.
 - Paths resolve like Pi's built-in file tools; filesystem access follows process permissions.
 - Conflicting operations touching the same source or destination are rejected.
+- Paths through symlinked parent directories are canonicalized before conflict checks and mutation locking.
 - No-op updates are rejected.
 - Source content is revalidated after mutation queues are acquired.
 
@@ -103,7 +104,7 @@ Both extension load orders are supported through Progressive Tools provider prot
 
 ## Development
 
-Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.18.0 with Pi 0.82.0.
+Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.18.0 with Pi 0.87.1.
 
 ```bash
 mise install
@@ -131,7 +132,7 @@ Development and package smoke tests pin:
 
 - Node.js 24.18.0 through mise
 - npm locked dependencies
-- Pi 0.82.0
+- Pi 0.87.1
 - TypeScript 7
 
 Pi runtime dependencies remain `"*"` peer dependencies.
