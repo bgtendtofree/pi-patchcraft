@@ -38,8 +38,15 @@ run(
 const installedPackage = join(hostDirectory, "node_modules", ...manifest.name.split("/"));
 if (!existsSync(installedPackage)) throw new Error(`Packed package was not installed: ${installedPackage}`);
 
-const piBinary = join(hostDirectory, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi");
-run(piBinary, ["--offline", "--no-extensions", "-e", installedPackage, "--list-models"], hostDirectory);
+// --list-models exits before Pi reports runtime extension errors.
+const smoke = `
+import assert from "node:assert/strict";
+import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
+const result = await discoverAndLoadExtensions([process.argv[1]], process.cwd(), "./agent");
+assert.deepEqual(result.errors, []);
+assert.equal(result.extensions.length, ${manifest.pi.extensions.length});
+`;
+run(process.execPath, ["--input-type=module", "-e", smoke, installedPackage], hostDirectory);
 console.log(`Packed runtime smoke passed: ${manifest.name} with Pi ${PI_VERSION} on Node ${process.versions.node}`);
 
 function run(command, args, cwd, capture = false) {

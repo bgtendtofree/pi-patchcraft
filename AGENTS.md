@@ -9,11 +9,11 @@ Patchcraft provides Pi with a transactional Codex-style `apply_patch` tool. Pres
 ## Stack
 
 - Runtime: Node.js `>=24` through Pi
-- Development tooling: Node.js 24.18.0 through project mise config and npm
+- Development tooling: Node.js 24.19.0 through project mise config and npm
 - TypeScript 7, strict mode, ES2024
 - Formatting and linting: Biome
 - Tests: Node.js `node:test`
-- Pi development baseline: `@earendil-works/pi-coding-agent` 0.87.1
+- Pi development baseline: `@earendil-works/pi-coding-agent` 0.99.1
 
 Pi loads the TypeScript files directly. Runtime source and tests use separate TypeScript configs.
 
@@ -111,7 +111,7 @@ Use `npm run validate` for normal source changes. Use full `npm run ci` before r
 Local Pi smoke test:
 
 ```bash
-pi --offline --no-extensions -e . --list-models
+npm run smoke:package
 pi -e ./src/index.ts
 ```
 

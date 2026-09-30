@@ -104,7 +104,7 @@ Both extension load orders are supported through Progressive Tools provider prot
 
 ## Development
 
-Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.18.0 with Pi 0.87.1.
+Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 0.99.1.
 
 ```bash
 mise install
@@ -122,7 +122,7 @@ npm run ci
 Load local source:
 
 ```bash
-pi --offline --no-extensions -e . --list-models
+npm run smoke:package
 pi -e ./src/index.ts
 ```
 
@@ -130,9 +130,9 @@ pi -e ./src/index.ts
 
 Development and package smoke tests pin:
 
-- Node.js 24.18.0 through mise
+- Node.js 24.19.0 through mise
 - npm locked dependencies
-- Pi 0.87.1
+- Pi 0.99.1
 - TypeScript 7
 
 Pi runtime dependencies remain `"*"` peer dependencies.
