@@ -16,7 +16,15 @@ export function renderPatchResult(
 	result: { content: Array<{ type: string; text?: string }>; details: PatchResultDetails | undefined },
 	options: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
+	context: { isError: boolean },
 ): Container | Text {
+	if (context.isError) {
+		const text = result.content
+			.filter((part) => part.type === "text")
+			.map((part) => part.text)
+			.join("\n");
+		return new Text(theme.fg("error", text || "Patch failed."), 0, 0, (line) => theme.bg("toolErrorBg", line));
+	}
 	if (options.isPartial) {
 		const text = result.content.find((part) => part.type === "text")?.text ?? "Applying patch…";
 		return new Text(theme.fg("warning", text), 0, 0);

@@ -80,7 +80,7 @@ Preserve fuzz accounting. Prefer failure over adding broader or ambiguous matchi
 ## Progressive Tools Integration
 
 - Integration is optional; Patchcraft must work without Progressive Tools installed.
-- Discover protocol v1 through its versioned `Symbol.for()` keys; do not add a runtime package dependency.
+- Discover protocol v2 through its versioned `Symbol.for()` keys; do not add a runtime package dependency.
 - Support both load orders through immediate registration or the pending queue.
 - Adapter code owns presentation only. It must not execute patches, mutate tool results, or write session entries.
 - Retain the standalone fallback renderer.

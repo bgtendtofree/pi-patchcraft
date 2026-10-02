@@ -62,10 +62,16 @@ Patchcraft defaults to automatic mode: `gpt-*` models receive `apply_patch` in p
 /patchcraft          Show current mode and effective state
 /patchcraft auto     Select by model id (default)
 /patchcraft on       Force apply_patch for current session
-/patchcraft off      Restore edit/write for current session
+/patchcraft off      Restore baseline edit/write for current session
 ```
 
 Mode changes persist in current session across reloads, resumes, and tree navigation. New sessions default to `auto`.
+
+Before changing tools, Patchcraft saves the active-tool baseline as session metadata. Reloads, resumes, tree navigation, and forks restore it from the active branch. Only `edit` and `write` that were enabled in that baseline are restored; other tools retain their current enabled/disabled state. New sessions capture their own baseline.
+
+Older sessions without baseline metadata use the current active tools conservatively. If those tools were already replaced by Patchcraft, the original `edit`/`write` choices cannot be recovered reliably, so neither is guessed back on. Start a new session with the desired editing tools enabled to establish a fresh baseline.
+
+For virtual models, Pi's `ctx.model` is the selected virtual model, not the physical model dispatched for each request. `auto` checks that selected id only; it does not detect GPT through routing. Use `/patchcraft on` to enable patches for a router with a non-`gpt-*` id.
 
 ## Safety semantics
 

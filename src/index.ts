@@ -14,6 +14,7 @@ const patchParameters = Type.Object({
 
 const managedTools = new Set(["apply_patch", "edit", "write"]);
 const modeEntryType = "patchcraft-mode";
+const baselineEntryType = "patchcraft-baseline-tools";
 
 type PatchcraftMode = "auto" | "off" | "on";
 
@@ -59,12 +60,21 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		return id.split("/").pop()?.startsWith("gpt-") ?? false;
 	}
 
-	function restoreMode(ctx: ExtensionContext): void {
+	function restoreState(ctx: ExtensionContext): void {
 		mode = "auto";
+		baselineTools = undefined;
 		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type !== "custom" || entry.customType !== modeEntryType) continue;
-			const saved = entry.data as PatchcraftModeState | undefined;
-			if (saved?.mode === "auto" || saved?.mode === "on" || saved?.mode === "off") mode = saved.mode;
+			if (entry.type !== "custom") continue;
+			if (entry.customType === modeEntryType) {
+				const saved = entry.data as PatchcraftModeState | undefined;
+				if (saved?.mode === "auto" || saved?.mode === "on" || saved?.mode === "off") mode = saved.mode;
+			}
+			if (entry.customType === baselineEntryType) {
+				const saved = entry.data as { tools?: unknown } | undefined;
+				if (Array.isArray(saved?.tools) && saved.tools.every((name): name is string => typeof name === "string")) {
+					baselineTools = [...new Set(saved.tools)];
+				}
+			}
 		}
 	}
 
@@ -75,7 +85,13 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	}
 
 	function syncTools(ctx: ExtensionContext): void {
-		baselineTools ??= pi.getActiveTools();
+		if (!baselineTools) {
+			// Pi restores the already-replaced loadout on resume/reload. Persist before replacing it.
+			// ponytail: legacy sessions have no provenance; keep current tools rather than guess edit/write.
+			const tools = pi.getActiveTools();
+			pi.appendEntry(baselineEntryType, { tools });
+			baselineTools = tools;
+		}
 		const current = pi.getActiveTools();
 		const usePatchcraft = wantsPatchcraft(ctx);
 		const desiredManaged = new Set<string>();
@@ -127,6 +143,12 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			"Use apply_patch for file edits when available, combining related multi-file changes in one patch.",
 		],
 		parameters: patchParameters,
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: false,
+			openWorldHint: false,
+		},
 		// Codemode scripts receive this shape instead of the text content.
 		outputSchema: patchResultSchema,
 		prepareArguments: normalizeArguments,
@@ -177,17 +199,17 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 						{ content: result.content, details: result.details as PatchResultDetails | undefined },
 						options,
 						theme,
+						context,
 					);
 		},
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		baselineTools = pi.getActiveTools();
-		restoreMode(ctx);
+		restoreState(ctx);
 		syncTools(ctx);
 	});
 	pi.on("session_tree", (_event, ctx) => {
-		restoreMode(ctx);
+		restoreState(ctx);
 		syncTools(ctx);
 	});
 	pi.on("model_select", (_event, ctx) => syncTools(ctx));
