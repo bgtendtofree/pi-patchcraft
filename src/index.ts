@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { applyPatchPlan, planPatch } from "./apply.ts";
+import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
 import { getProgressiveToolsAPI, patchcraftAdapter, registerProgressiveAdapter } from "./progressive.ts";
 import { renderPatchCall, renderPatchResult } from "./render.ts";
 import type { PatchPlan, PatchResultDetails } from "./types.ts";
@@ -128,6 +129,9 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		parameters: patchParameters,
 		prepareArguments: normalizeArguments,
 		executionMode: "sequential",
+		// Capable models write the patch as raw text instead of a JSON-escaped string. Pi falls back
+		// to the JSON-schema function tool on providers without grammar constrained sampling.
+		constrainedSampling: { type: "grammar", variants: { openai_lark: APPLY_PATCH_LARK_GRAMMAR } },
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			if (!params.patch) throw new Error("patch is required");
 			onUpdate?.({

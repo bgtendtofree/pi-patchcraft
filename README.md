@@ -17,6 +17,7 @@ Patchcraft gives GPT models their familiar Codex patch language. It validates th
 - Concurrent source-change detection
 - Exact, whitespace-tolerant, and Unicode-normalized context matching
 - Automatic `apply_patch` activation for `gpt-*` models
+- Grammar-constrained patch text on OpenAI models that support custom tools
 - Automatic restoration of Pi `edit` / `write` tools for other models
 - Session-scoped `/patchcraft auto|on|off` override for any model
 - Optional [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools) compact rendering
@@ -47,6 +48,8 @@ Tool input uses Pi's public JSON tool API:
 ```
 
 Compatibility input names `input` and `patchText`, plus raw string arguments, are normalized before schema validation.
+
+On OpenAI endpoints that support custom tools with grammar formats (GPT-5 and later on OpenAI, Azure OpenAI, Codex, and compatible gateways), Patchcraft declares the [Codex `apply_patch` grammar](https://github.com/openai/codex/blob/main/codex-rs/tools/src/tool_apply_patch.lark). Those models write the patch as raw text instead of a JSON-escaped string. Everywhere else Pi falls back to the same JSON-schema function tool, so Patchcraft does not detect model capabilities itself.
 
 ## Tool mode
 
@@ -104,7 +107,7 @@ Both extension load orders are supported through Progressive Tools provider prot
 
 ## Development
 
-Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 0.99.1.
+Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.0.0.
 
 ```bash
 mise install
@@ -132,7 +135,7 @@ Development and package smoke tests pin:
 
 - Node.js 24.19.0 through mise
 - npm locked dependencies
-- Pi 0.99.1
+- Pi 1.0.0
 - TypeScript 7
 
 Pi runtime dependencies remain `"*"` peer dependencies.

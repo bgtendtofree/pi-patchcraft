@@ -13,7 +13,7 @@ Patchcraft provides Pi with a transactional Codex-style `apply_patch` tool. Pres
 - TypeScript 7, strict mode, ES2024
 - Formatting and linting: Biome
 - Tests: Node.js `node:test`
-- Pi development baseline: `@earendil-works/pi-coding-agent` 0.99.1
+- Pi development baseline: `@earendil-works/pi-coding-agent` 1.0.0
 
 Pi loads the TypeScript files directly. Runtime source and tests use separate TypeScript configs.
 
@@ -44,6 +44,7 @@ Keep `index.ts` thin. Put pure parsing, matching, path, and rendering logic in f
 
 - Public tool name remains `apply_patch`.
 - Public schema remains `{ patch: string }`; compatibility normalization may accept `input`, `patchText`, and raw strings.
+- Keep the parameter schema to exactly one required string property. Pi's grammar constrained sampling requires it and rejects every request on grammar-capable models otherwise, so `src/grammar.ts` and `patchParameters` must stay in sync.
 - Support Add, Delete, Update, optional Move, stacked `@@` context, `*** End of File`, and multi-file envelopes.
 - Reject malformed lines instead of silently skipping them.
 - Keep model-visible tool descriptions concise. Do not inject the full grammar into Pi's system prompt unless evidence shows it is required.

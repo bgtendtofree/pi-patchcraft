@@ -9,6 +9,8 @@ import type { PatchResultDetails } from "../src/types.ts";
 
 interface RegisteredTool {
 	name: string;
+	parameters?: unknown;
+	constrainedSampling?: { type: string; variants: { openai_lark?: string } };
 	prepareArguments?(args: unknown): { patch: string };
 	execute(
 		toolCallId: string,
@@ -164,5 +166,51 @@ describe("pi-patchcraft extension", () => {
 		entries.push({ type: "custom", customType: "patchcraft-mode", data: { mode: "off" } });
 		handlers.get("session_tree")?.({}, context);
 		assert.deepEqual(activeTools, ["read", "edit", "write", "bash"]);
+	});
+
+	it("declares grammar constrained sampling for capable models", () => {
+		let tool: RegisteredTool | undefined;
+		const pi = {
+			registerTool(value: RegisteredTool) {
+				tool = value;
+			},
+			on() {},
+			getActiveTools: () => [],
+			setActiveTools() {},
+			registerCommand() {},
+		} as unknown as ExtensionAPI;
+
+		piPatchcraft(pi);
+
+		// Pi requires exactly one required string property for grammar tools and rejects every
+		// request on capable models otherwise, instead of falling back.
+		const schema = tool?.parameters as {
+			type?: string;
+			required?: string[];
+			properties?: Record<string, { type?: string }>;
+		};
+		assert.equal(schema?.type, "object");
+		assert.deepEqual(schema?.required, ["patch"]);
+		assert.equal(schema?.properties?.patch?.type, "string");
+
+		const { variants } = tool?.constrainedSampling ?? { type: "", variants: {} };
+		assert.equal(tool?.constrainedSampling?.type, "grammar");
+		const grammarText = variants.openai_lark ?? "";
+		assert.ok(grammarText.length > 0);
+		// The grammar has to stay the patch language parser.ts accepts.
+		for (const marker of [
+			"*** Begin Patch",
+			"*** End Patch",
+			"*** Add File: ",
+			"*** Delete File: ",
+			"*** Update File: ",
+			"*** Move to: ",
+			"*** End of File",
+			"@@",
+		]) {
+			assert.ok(grammarText.includes(marker), `grammar is missing ${marker}`);
+		}
+		// Additions have to allow empty lines; openai/codex#2651 fixed a /\(.+\)/ here.
+		assert.ok(grammarText.includes('add_line: "+" /(.*)/ LF -> line'));
 	});
 });
