@@ -4,7 +4,7 @@ import { applyPatchPlan, planPatch } from "./apply.ts";
 import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
 import { getProgressiveToolsAPI, patchcraftAdapter, registerProgressiveAdapter } from "./progressive.ts";
 import { renderPatchCall, renderPatchResult } from "./render.ts";
-import type { PatchPlan, PatchResultDetails } from "./types.ts";
+import { type PatchPlan, type PatchResultDetails, patchResultSchema } from "./types.ts";
 
 const patchParameters = Type.Object({
 	patch: Type.String({
@@ -127,6 +127,8 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			"Use apply_patch for file edits when available, combining related multi-file changes in one patch.",
 		],
 		parameters: patchParameters,
+		// Codemode scripts receive this shape instead of the text content.
+		outputSchema: patchResultSchema,
 		prepareArguments: normalizeArguments,
 		executionMode: "sequential",
 		// Capable models write the patch as raw text instead of a JSON-escaped string. Pi falls back
@@ -159,6 +161,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 					},
 				],
 				details: resultDetails(plan),
+				structuredContent: resultDetails(plan),
 			};
 		},
 		renderShell: "self",

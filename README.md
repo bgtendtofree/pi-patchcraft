@@ -18,6 +18,7 @@ Patchcraft gives GPT models their familiar Codex patch language. It validates th
 - Exact, whitespace-tolerant, and Unicode-normalized context matching
 - Automatic `apply_patch` activation for `gpt-*` models
 - Grammar-constrained patch text on OpenAI models that support custom tools
+- Structured result for `codemode` scripts (`changes`, `added`, `removed`, `fuzz`)
 - Automatic restoration of Pi `edit` / `write` tools for other models
 - Session-scoped `/patchcraft auto|on|off` override for any model
 - Optional [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools) compact rendering
@@ -48,6 +49,8 @@ Tool input uses Pi's public JSON tool API:
 ```
 
 Compatibility input names `input` and `patchText`, plus raw string arguments, are normalized before schema validation.
+
+The tool declares an output schema, so a [`codemode`](https://pi.dev/docs/codemode) script receives `{ changes, added, removed, fuzz }` from `tools.apply_patch(...)` instead of the text result. The model-facing content is unchanged.
 
 On OpenAI endpoints that support custom tools with grammar formats (GPT-5 and later on OpenAI, Azure OpenAI, Codex, and compatible gateways), Patchcraft declares the [Codex `apply_patch` grammar](https://github.com/openai/codex/blob/main/codex-rs/tools/src/tool_apply_patch.lark). Those models write the patch as raw text instead of a JSON-escaped string. Everywhere else Pi falls back to the same JSON-schema function tool, so Patchcraft does not detect model capabilities itself.
 

@@ -10,6 +10,7 @@ import type { PatchResultDetails } from "../src/types.ts";
 interface RegisteredTool {
 	name: string;
 	parameters?: unknown;
+	outputSchema?: { properties?: Record<string, unknown> };
 	constrainedSampling?: { type: string; variants: { openai_lark?: string } };
 	prepareArguments?(args: unknown): { patch: string };
 	execute(
@@ -18,7 +19,11 @@ interface RegisteredTool {
 		signal: AbortSignal | undefined,
 		onUpdate: undefined,
 		ctx: { cwd: string },
-	): Promise<{ content: Array<{ type: string; text: string }>; details: PatchResultDetails }>;
+	): Promise<{
+		content: Array<{ type: string; text: string }>;
+		details: PatchResultDetails;
+		structuredContent?: PatchResultDetails;
+	}>;
 }
 
 interface RegisteredCommand {
@@ -113,6 +118,11 @@ describe("pi-patchcraft extension", () => {
 		]);
 		assert.equal("before" in (change ?? {}), false);
 		assert.equal("after" in (change ?? {}), false);
+		// Codemode scripts receive structuredContent, so it has to mirror the details shape and the
+		// declared outputSchema exactly.
+		assert.deepEqual(result?.structuredContent, details);
+		assert.deepEqual(Object.keys(result?.structuredContent ?? {}).sort(), ["added", "changes", "fuzz", "removed"]);
+		assert.deepEqual(Object.keys(tool?.outputSchema?.properties ?? {}).sort(), ["added", "changes", "fuzz", "removed"]);
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
 	});
 

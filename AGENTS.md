@@ -25,7 +25,7 @@ Pi loads the TypeScript files directly. Runtime source and tests use separate Ty
 - `src/apply.ts` — planning, matching, locking, atomic writes, rollback
 - `src/progressive.ts` — optional Progressive Tools protocol adapter
 - `src/render.ts` — standalone fallback renderer
-- `src/types.ts` — shared patch, plan, result, and renderer detail types
+- `src/types.ts` — shared patch, plan, result, and renderer detail types, plus the codemode result schema
 - `test/*.test.ts` — mirrored Node.js test suites
 
 Keep `index.ts` thin. Put pure parsing, matching, path, and rendering logic in focused modules.
@@ -44,6 +44,7 @@ Keep `index.ts` thin. Put pure parsing, matching, path, and rendering logic in f
 
 - Public tool name remains `apply_patch`.
 - Public schema remains `{ patch: string }`; compatibility normalization may accept `input`, `patchText`, and raw strings.
+- Keep `patchResultSchema` mirroring `PatchResultDetails`; `codemode` scripts receive it as the tool's `structuredContent`.
 - Keep the parameter schema to exactly one required string property. Pi's grammar constrained sampling requires it and rejects every request on grammar-capable models otherwise, so `src/grammar.ts` and `patchParameters` must stay in sync.
 - Support Add, Delete, Update, optional Move, stacked `@@` context, `*** End of File`, and multi-file envelopes.
 - Reject malformed lines instead of silently skipping them.
