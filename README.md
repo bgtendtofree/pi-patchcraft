@@ -112,7 +112,7 @@ For compact tool rows and per-file native diff views in Transcript Navigator, in
 pi install git:github.com/bgtendtofree/pi-progressive-tools
 ```
 
-Both extension load orders are supported through Progressive Tools provider protocol v2. Press `y` in Block Reader to copy the original transcript result. Result metadata stores diffs instead of full file snapshots.
+Both extension load orders are supported through Progressive Tools provider protocol v2. Press `y` in Block Reader to copy the original transcript result. Result metadata stores diffs instead of full file snapshots. Patchcraft's `apply_patch` row title and metrics (first target file, ` +N files`, `+added`, `-removed`, `fuzz N`) are produced by its own `summarize()` adapter hook; the host renders them without any Patchcraft-specific branch.
 
 ## Development
 

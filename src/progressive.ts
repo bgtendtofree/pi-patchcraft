@@ -1,3 +1,4 @@
+import { isAbsolute, relative, sep } from "node:path";
 import type { Component } from "@earendil-works/pi-tui";
 import { parsePatch } from "./parser.ts";
 import type { PatchResultDetails } from "./types.ts";
@@ -5,17 +6,39 @@ import type { PatchResultDetails } from "./types.ts";
 const API_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/api/v2");
 const PENDING_KEY = Symbol.for("@bgtendtofree/pi-progressive-tools/pending/v2");
 
+// Mirrors the Progressive Tools v2 protocol (@bgtendtofree/pi-progressive-tools).
+// Keep in sync when the host protocol changes; cross-repo type-only assertions are
+// not possible while that package is private and unpublished.
 interface ProgressiveToolTitle {
 	verb: string;
 	subject?: string;
 	context?: string;
-	elide?: "end" | "middle";
+	/** Subject shrink policy when the row is narrow. "path" prefers the file name. */
+	elide?: "end" | "middle" | "path";
 	accentSubject?: boolean;
 }
 
 interface ProgressiveToolResultView {
+	/** Final result text, kept for previews. */
+	text?: string;
+	/** Original input; historical orphan results may omit it. */
+	args?: unknown;
+	cwd?: string;
+	content?: unknown[];
 	details?: unknown;
+	nestedCalls?: unknown;
 	isError: boolean;
+	/** True while the tool still streams; terminal metrics are usually unavailable. */
+	isPartial?: boolean;
+}
+
+interface ProgressiveToolSummary {
+	/** Optional result-derived title; never rewrites arguments. */
+	title?: ProgressiveToolTitle;
+	status?: string;
+	/** Highlight a non-fatal status without changing the execution phase. */
+	statusTone?: "warning";
+	metrics?: string[];
 }
 
 interface ProgressiveToolDetailSection {
@@ -33,8 +56,8 @@ export interface ProgressiveToolAdapter {
 	version: 2;
 	id: string;
 	toolNames: string[];
-	title(args: unknown): ProgressiveToolTitle;
-	summarize?(result: ProgressiveToolResultView): { status?: string; metrics?: string[] };
+	title(args: unknown, context?: { cwd?: string }): ProgressiveToolTitle;
+	summarize?(result: ProgressiveToolResultView): ProgressiveToolSummary;
 	detail?(result: ProgressiveToolResultView): ProgressiveToolDetail | undefined;
 }
 
@@ -81,12 +104,41 @@ function patchHeaders(value: unknown): PatchHeader[] {
 	}
 }
 
+const PATCH_OPERATIONS = new Set(["add", "delete", "update", "move"]);
+
+function isPlannedChange(value: unknown): boolean {
+	const change = asRecord(value);
+	return (
+		typeof change.operation === "string" &&
+		PATCH_OPERATIONS.has(change.operation) &&
+		typeof change.path === "string" &&
+		typeof change.targetPath === "string" &&
+		change.targetPath.length > 0
+	);
+}
+
+/** The published PatchResultDetails shape; malformed or empty plans are rejected. */
 export function getPatchDetails(value: unknown): PatchResultDetails | undefined {
 	const record = asRecord(value);
-	if (Array.isArray(record.changes) && typeof record.added === "number" && typeof record.removed === "number") {
-		return value as PatchResultDetails;
+	if (
+		!Array.isArray(record.changes) ||
+		record.changes.length === 0 ||
+		typeof record.added !== "number" ||
+		typeof record.removed !== "number" ||
+		typeof record.fuzz !== "number" ||
+		!record.changes.every(isPlannedChange)
+	) {
+		return undefined;
 	}
-	return undefined;
+	return value as PatchResultDetails;
+}
+
+/** Shorten a path against a known cwd; never guesses one. Mirrors the host's displayPath,
+ * so Patchcraft's own summary matches the rows Progressive Tools used to build. */
+function displayPath(value: string, cwd?: string): string {
+	if (typeof cwd !== "string" || !isAbsolute(value)) return value;
+	const local = relative(cwd, value);
+	return local === ".." || local.startsWith(`..${sep}`) || isAbsolute(local) ? value : local || ".";
 }
 
 function changeTitle(change: PatchResultDetails["changes"][number]): string {
@@ -100,42 +152,59 @@ function pathTitle(verb: string, subject: string): ProgressiveToolTitle {
 	return { verb, subject, elide: "middle", accentSubject: true };
 }
 
+function patchTitle(args: unknown): ProgressiveToolTitle {
+	const headers = patchHeaders(args);
+	if (headers.length === 0) return { verb: "Patch", subject: "…" };
+	if (headers.length > 1) {
+		return {
+			verb: "Patch",
+			subject: `${headers.length} files`,
+			context: headers
+				.slice(0, 2)
+				.map((header) => header.targetPath ?? header.path)
+				.join(", "),
+		};
+	}
+
+	const header = headers[0];
+	if (!header) return { verb: "Patch", subject: "…" };
+	if (header.operation === "add") return pathTitle("Add", header.path);
+	if (header.operation === "delete") return pathTitle("Delete", header.path);
+	if (header.operation === "move") {
+		return pathTitle("Move", `${header.path} → ${header.targetPath ?? "…"}`);
+	}
+	return pathTitle("Update", header.path);
+}
+
 export const patchcraftAdapter: ProgressiveToolAdapter = {
 	version: 2,
 	id: "@bgtendtofree/pi-patchcraft/apply-patch",
 	toolNames: ["apply_patch"],
 	title(args) {
-		const headers = patchHeaders(args);
-		if (headers.length === 0) return { verb: "Patch", subject: "…" };
-		if (headers.length > 1) {
-			return {
-				verb: "Patch",
-				subject: `${headers.length} files`,
-				context: headers
-					.slice(0, 2)
-					.map((header) => header.targetPath ?? header.path)
-					.join(", "),
-			};
-		}
-
-		const header = headers[0];
-		if (!header) return { verb: "Patch", subject: "…" };
-		if (header.operation === "add") return pathTitle("Add", header.path);
-		if (header.operation === "delete") return pathTitle("Delete", header.path);
-		if (header.operation === "move") {
-			return pathTitle("Move", `${header.path} → ${header.targetPath ?? "…"}`);
-		}
-		return pathTitle("Update", header.path);
+		return patchTitle(args);
 	},
 	summarize(view) {
 		const plan = getPatchDetails(view.details);
 		if (!plan) return view.isError ? { status: "failed" } : {};
-		const fileCount = plan.changes.length;
-		const metrics = [`${fileCount} ${fileCount === 1 ? "file" : "files"}`];
+		const changes = plan.changes;
+		const first = changes[0];
+		if (first === undefined) return view.isError ? { status: "failed" } : {};
+		const metrics: string[] = [];
 		if (plan.added > 0) metrics.push(`+${plan.added}`);
 		if (plan.removed > 0) metrics.push(`-${plan.removed}`);
 		if (plan.fuzz > 0) metrics.push(`fuzz ${plan.fuzz}`);
-		return { metrics };
+		// Multi-file rows carry the remaining-file count in the subject; the numeric file
+		// metric was folded into it, so summarize never repeats it.
+		const suffix = changes.length > 1 ? ` +${changes.length - 1} file${changes.length > 2 ? "s" : ""}` : "";
+		return {
+			title: {
+				verb: changes.length > 1 ? "Patch" : patchTitle(view.args).verb,
+				subject: `${displayPath(first.targetPath, view.cwd)}${suffix}`,
+				elide: "path",
+				accentSubject: true,
+			},
+			metrics,
+		};
 	},
 	detail(view) {
 		const plan = getPatchDetails(view.details);
