@@ -23,8 +23,8 @@ Pi loads the TypeScript files directly. Runtime source and tests use separate Ty
 - `src/parser.ts` — Codex patch envelope and operation parser
 - `src/paths.ts` — Pi-compatible path normalization and resolution
 - `src/apply.ts` — planning, matching, locking, atomic writes, rollback
-- `src/progressive.ts` — optional Progressive Tools protocol adapter
-- `src/render.ts` — standalone fallback renderer
+- `src/row.ts` — row semantics: patch details validation, titles, metrics, and detail sections
+- `src/render.ts` — the tool's own row renderer (call title plus result status, metrics, and expanded diff)
 - `src/types.ts` — shared patch, plan, result, and renderer detail types, plus the codemode result schema
 - `test/*.test.ts` — mirrored Node.js test suites
 
@@ -77,14 +77,13 @@ Context matching progresses from exact to increasingly fuzzy forms:
 
 Preserve fuzz accounting. Prefer failure over adding broader or ambiguous matching.
 
-## Progressive Tools Integration
+## Tool Row
 
-- Integration is optional; Patchcraft must work without Progressive Tools installed.
-- Discover protocol v2 through its versioned `Symbol.for()` keys; do not add a runtime package dependency.
-- Support both load orders through immediate registration or the pending queue.
-- Adapter code owns presentation only. It must not execute patches, mutate tool results, or write session entries.
-- Retain the standalone fallback renderer.
-- Keep adapter id stable: `@bgtendtofree/pi-patchcraft/apply-patch`.
+- Patchcraft owns its `apply_patch` row: `renderShell: "self"`, with `renderCall` and `renderResult` from `src/render.ts`.
+- `renderResult` updates the same header component created by `renderCall` through `context.state`, so a completed patch keeps one title line with its metrics instead of stacking a second.
+- Keep the result title vocabulary: first target file, ` +N files` for multi-file patches, `+added`, `-removed`, and `fuzz N` (zero values suppressed), plus `failed` for errors.
+- There is no cross-package protocol or adapter registration. With [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools) installed, Pi leaves a self-rendering tool untouched and its rows join the activity group as opaque members; without it, the same rows render standalone. Do not add a runtime dependency or import its internals.
+- The row carries no host chrome (no animation or elapsed time): while a patch runs it shows only its own partial text, and with Progressive Tools installed the group's chase comes from a host-drawn row in the same group.
 
 ## Model Tool Policy
 
@@ -123,7 +122,7 @@ pi -e ./src/index.ts
 - Path changes: test relative, absolute, home-relative, parent, and symlinked paths.
 - Apply changes: test preflight, no-op rejection, fuzzy matching, moves, source drift, and rollback behavior.
 - Tool wiring changes: test registration, argument normalization, model switching, and error signaling.
-- Rendering changes: test operation titles, singular/plural metrics, zero suppression, multi-file summaries, and Progressive Tools absence.
+- Rendering changes: test operation titles, singular/plural metrics, zero suppression, multi-file summaries, and the standalone self-rendered row.
 - Keep coverage thresholds passing; do not lower them to accommodate untested behavior.
 
 ## Repository Hygiene

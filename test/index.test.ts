@@ -413,7 +413,6 @@ describe("pi-patchcraft extension", () => {
 	});
 
 	it("renders standalone success titles and expanded diffs without Progressive Tools", () => {
-		assert.equal(Reflect.get(globalThis, Symbol.for("@bgtendtofree/pi-progressive-tools/api/v2")), undefined);
 		initTheme("dark", false);
 		const { tool } = extensionHarness([]);
 		assert.equal(tool.renderShell, "self");
@@ -436,7 +435,7 @@ describe("pi-patchcraft extension", () => {
 				.render(80)
 				.join("\n"),
 		);
-		assert.match(expanded, /move old\.ts → new\.ts \(\+1 -1\)/);
+		assert.match(expanded, /Move old\.ts → new\.ts \(\+1 -1\)/);
 		assert.match(expanded, /old/);
 		assert.match(expanded, /new/);
 	});

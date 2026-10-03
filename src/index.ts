@@ -2,7 +2,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { applyPatchPlan, planPatch } from "./apply.ts";
 import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
-import { getProgressiveToolsAPI, patchcraftAdapter, registerProgressiveAdapter } from "./progressive.ts";
 import { renderPatchCall, renderPatchResult } from "./render.ts";
 import { type PatchPlan, type PatchResultDetails, patchResultSchema } from "./types.ts";
 
@@ -115,7 +114,6 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		if (next.length !== current.length || next.some((name, index) => name !== current[index])) pi.setActiveTools(next);
 	}
 
-	registerProgressiveAdapter(patchcraftAdapter);
 	pi.registerCommand("patchcraft", {
 		description: "Show or change apply_patch tool mode",
 		async handler(args, ctx) {
@@ -188,19 +186,15 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		},
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			const api = getProgressiveToolsAPI();
-			return api ? api.renderCall(patchcraftAdapter, args, theme, context) : renderPatchCall(args, theme);
+			return renderPatchCall(args, theme, context);
 		},
 		renderResult(result, options, theme, context) {
-			const api = getProgressiveToolsAPI();
-			return api
-				? api.renderResult(patchcraftAdapter, result, options, theme, context)
-				: renderPatchResult(
-						{ content: result.content, details: result.details as PatchResultDetails | undefined },
-						options,
-						theme,
-						context,
-					);
+			return renderPatchResult(
+				{ content: result.content, details: result.details as PatchResultDetails | undefined },
+				options,
+				theme,
+				context,
+			);
 		},
 	});
 

@@ -21,8 +21,8 @@ Patchcraft gives GPT models their familiar Codex patch language. It validates th
 - Structured result for `codemode` scripts (`changes`, `added`, `removed`, `fuzz`)
 - Automatic restoration of Pi `edit` / `write` tools for other models
 - Session-scoped `/patchcraft auto|on|off` override for any model
-- Optional [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools) compact rendering
-- Independent fallback renderer when Progressive Tools is absent
+- Patchcraft renders its own tool row: title, status, `+added` / `-removed` / `fuzz N`, and the per-file diff when expanded
+- Those rows fold into [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools) activity groups when it is installed, and render the same way without it
 
 ## Patch format
 
@@ -112,7 +112,7 @@ For compact tool rows and per-file native diff views in Transcript Navigator, in
 pi install git:github.com/bgtendtofree/pi-progressive-tools
 ```
 
-Both extension load orders are supported through Progressive Tools provider protocol v2. Press `y` in Block Reader to copy the original transcript result. Result metadata stores diffs instead of full file snapshots. Patchcraft's `apply_patch` row title and metrics (first target file, ` +N files`, `+added`, `-removed`, `fuzz N`) are produced by its own `summarize()` adapter hook; the host renders them without any Patchcraft-specific branch.
+Patchcraft always draws its own `apply_patch` row; there is no code contract between the two extensions. When Progressive Tools is installed, its rows join the activity group as opaque members: the group header counts them by tool label, and each row keeps its own title, metrics, and diff when expanded. Without Progressive Tools, the same rows render standalone. The row carries no host chrome: while a patch runs it shows only its own partial text, and when Progressive Tools is installed the group's chase comes from a host-drawn row in the same group.
 
 ## Development
 
