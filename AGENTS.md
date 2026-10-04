@@ -13,7 +13,7 @@ Patchcraft provides Pi with a transactional Codex-style `apply_patch` tool. Pres
 - TypeScript 7, strict mode, ES2024
 - Formatting and linting: Biome
 - Tests: Node.js `node:test`
-- Pi development baseline: `@earendil-works/pi-coding-agent` 1.0.0
+- Pi development baseline: `@earendil-works/pi-coding-agent` 1.0.1
 
 Pi loads the TypeScript files directly. Runtime source and tests use separate TypeScript configs.
 
@@ -23,12 +23,10 @@ Pi loads the TypeScript files directly. Runtime source and tests use separate Ty
 - `src/parser.ts` — Codex patch envelope and operation parser
 - `src/paths.ts` — Pi-compatible path normalization and resolution
 - `src/apply.ts` — planning, matching, locking, atomic writes, rollback
-- `src/row.ts` — row semantics: patch details validation, titles, metrics, and detail sections
-- `src/render.ts` — the tool's own row renderer (call title plus result status, metrics, and expanded diff)
-- `src/types.ts` — shared patch, plan, result, and renderer detail types, plus the codemode result schema
+- `src/types.ts` — shared patch, plan, result detail types, plus the codemode result schema
 - `test/*.test.ts` — mirrored Node.js test suites
 
-Keep `index.ts` thin. Put pure parsing, matching, path, and rendering logic in focused modules.
+Keep `index.ts` thin. Put pure parsing, matching, and path logic in focused modules.
 
 ## Code Style
 
@@ -38,7 +36,7 @@ Keep `index.ts` thin. Put pure parsing, matching, path, and rendering logic in f
 - Prefer explicit unions and named interfaces over enums and ambiguous booleans.
 - Prefer whole-object assertions in tests when practical.
 - Throw from tool execution to report failure; returning an error-shaped result is still a successful Pi tool call.
-- Use only documented exports from `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox`.
+- Use only documented exports from `@earendil-works/pi-coding-agent` and `typebox`.
 
 ## Patch Language Contract
 
@@ -77,13 +75,13 @@ Context matching progresses from exact to increasingly fuzzy forms:
 
 Preserve fuzz accounting. Prefer failure over adding broader or ambiguous matching.
 
-## Tool Row
+## Tool Rendering
 
-- Patchcraft owns its `apply_patch` row: `renderShell: "self"`, with `renderCall` and `renderResult` from `src/render.ts`.
-- `renderResult` updates the same header component created by `renderCall` through `context.state`, so a completed patch keeps one title line with its metrics instead of stacking a second.
-- Keep the result title vocabulary: first target file, ` +N files` for multi-file patches, `+added`, `-removed`, and `fuzz N` (zero values suppressed), plus `failed` for errors.
-- There is no cross-package protocol or adapter registration. With [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools) installed, Pi leaves a self-rendering tool untouched and its rows join the activity group as opaque members; without it, the same rows render standalone. Do not add a runtime dependency or import its internals.
-- The row carries no host chrome (no animation or elapsed time): while a patch runs it shows only its own partial text, and with Progressive Tools installed the group's chase comes from a host-drawn row in the same group.
+- Do not register `renderCall`, `renderResult`, or `renderShell`; Pi's native renderer resolver owns presentation.
+- Without [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools), Pi uses its default row. With it, the generic compact row supplies shared alignment, Pac-Man animation, and grouping.
+- Do not add adapters, a cross-package protocol, runtime dependencies, or imports from Progressive Tools.
+- Preserve normal progress updates, errors, and returned `content`/`details`/`structuredContent`, including `displayDiff`, added/removed counts, and fuzz. Do not parse the patch again for presentation.
+- Regression tests must assert custom renderer fields are absent and execution/result data remain intact.
 
 ## Model Tool Policy
 
@@ -122,7 +120,7 @@ pi -e ./src/index.ts
 - Path changes: test relative, absolute, home-relative, parent, and symlinked paths.
 - Apply changes: test preflight, no-op rejection, fuzzy matching, moves, source drift, and rollback behavior.
 - Tool wiring changes: test registration, argument normalization, model switching, and error signaling.
-- Rendering changes: test operation titles, singular/plural metrics, zero suppression, multi-file summaries, and the standalone self-rendered row.
+- Presentation changes: assert native-renderer fallback, progress updates, and unmodified structured results; do not reintroduce self-rendering or adapter tests.
 - Keep coverage thresholds passing; do not lower them to accommodate untested behavior.
 
 ## Repository Hygiene

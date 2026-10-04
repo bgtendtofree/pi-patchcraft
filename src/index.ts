@@ -2,7 +2,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { applyPatchPlan, planPatch } from "./apply.ts";
 import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
-import { renderPatchCall, renderPatchResult } from "./render.ts";
 import { type PatchPlan, type PatchResultDetails, patchResultSchema } from "./types.ts";
 
 const patchParameters = Type.Object({
@@ -183,18 +182,6 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 				details: resultDetails(plan),
 				structuredContent: resultDetails(plan),
 			};
-		},
-		renderShell: "self",
-		renderCall(args, theme, context) {
-			return renderPatchCall(args, theme, context);
-		},
-		renderResult(result, options, theme, context) {
-			return renderPatchResult(
-				{ content: result.content, details: result.details as PatchResultDetails | undefined },
-				options,
-				theme,
-				context,
-			);
 		},
 	});
 

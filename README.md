@@ -21,8 +21,8 @@ Patchcraft gives GPT models their familiar Codex patch language. It validates th
 - Structured result for `codemode` scripts (`changes`, `added`, `removed`, `fuzz`)
 - Automatic restoration of Pi `edit` / `write` tools for other models
 - Session-scoped `/patchcraft auto|on|off` override for any model
-- Patchcraft renders its own tool row: title, status, `+added` / `-removed` / `fuzz N`, and the per-file diff when expanded
-- Those rows fold into [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools) activity groups when it is installed, and render the same way without it
+- Native Pi rendering, with no custom row or adapter layer
+- With [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools), generic rows gain shared alignment, running Pac-Man animation, and activity grouping
 
 ## Patch format
 
@@ -106,17 +106,19 @@ One run:
 pi -e git:github.com/bgtendtofree/pi-patchcraft
 ```
 
-For compact tool rows and per-file native diff views in Transcript Navigator, install Progressive Tools too:
+For compact, aligned tool rows, running Pac-Man animation, and Transcript Navigator, install Progressive Tools too:
 
 ```bash
 pi install git:github.com/bgtendtofree/pi-progressive-tools
 ```
 
-Patchcraft always draws its own `apply_patch` row; there is no code contract between the two extensions. When Progressive Tools is installed, its rows join the activity group as opaque members: the group header counts them by tool label, and each row keeps its own title, metrics, and diff when expanded. Without Progressive Tools, the same rows render standalone. The row carries no host chrome: while a patch runs it shows only its own partial text, and when Progressive Tools is installed the group's chase comes from a host-drawn row in the same group.
+Patchcraft does not register `renderCall`, `renderResult`, or `renderShell`. Pi draws the default row when used alone; Progressive Tools supplies its generic compact row when installed. No per-tool adapter, cross-package contract, or Progressive Tools dependency is needed.
+
+Custom operation titles, right-aligned patch metrics, and formatted per-file diff previews are no longer drawn. Patch execution and returned `content`, `details`, and `structuredContent` are unchanged: added/removed/fuzz counts and per-file `displayDiff` remain in the result, available to scripts and the Navigator's original details.
 
 ## Development
 
-Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.0.0.
+Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.0.1.
 
 ```bash
 mise install
@@ -144,7 +146,7 @@ Development and package smoke tests pin:
 
 - Node.js 24.19.0 through mise
 - npm locked dependencies
-- Pi 1.0.0
+- Pi 1.0.1
 - TypeScript 7
 
 Pi runtime dependencies remain `"*"` peer dependencies.

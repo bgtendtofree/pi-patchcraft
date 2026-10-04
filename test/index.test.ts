@@ -3,9 +3,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { stripVTControlCharacters } from "node:util";
-import { type ExtensionAPI, initTheme, SessionManager, type Theme } from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
+import {
+	type AgentToolResult,
+	type AgentToolUpdateCallback,
+	type ExtensionAPI,
+	SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import piPatchcraft from "../src/index.ts";
 import type { PatchResultDetails } from "../src/types.ts";
 
@@ -20,20 +23,12 @@ interface RegisteredTool {
 		idempotentHint: boolean;
 		openWorldHint: boolean;
 	};
-	renderShell?: string;
-	renderCall?(args: { patch: string }, theme: Theme, context: { isError: boolean }): Component;
-	renderResult?(
-		result: { content: Array<{ type: string; text?: string }>; details: PatchResultDetails | undefined },
-		options: { expanded: boolean; isPartial: boolean },
-		theme: Theme,
-		context: { isError: boolean },
-	): Component;
 	prepareArguments?(args: unknown): { patch: string };
 	execute(
 		toolCallId: string,
 		params: { patch: string },
 		signal: AbortSignal | undefined,
-		onUpdate: undefined,
+		onUpdate: AgentToolUpdateCallback<PatchResultDetails | undefined> | undefined,
 		ctx: { cwd: string },
 	): Promise<{
 		content: Array<{ type: string; text: string }>;
@@ -54,35 +49,6 @@ interface RegisteredCommand {
 }
 
 const temporaryDirectories: string[] = [];
-const renderTheme = {
-	fg(color: string, text: string) {
-		if (color === "error") return `\x1b[31m${text}\x1b[39m`;
-		if (color === "warning") return `\x1b[33m${text}\x1b[39m`;
-		return text;
-	},
-	bg(color: string, text: string) {
-		assert.equal(color, "toolErrorBg");
-		return `\x1b[41m${text}\x1b[49m`;
-	},
-	bold: (text: string) => text,
-} as unknown as Theme;
-const renderDetails: PatchResultDetails = {
-	changes: [
-		{
-			operation: "move",
-			path: "old.ts",
-			targetPath: "new.ts",
-			added: 1,
-			removed: 1,
-			fuzz: 0,
-			displayDiff: "-1 old\n+1 new",
-		},
-	],
-	added: 1,
-	removed: 1,
-	fuzz: 0,
-};
-
 function extensionHarness(tools: string[], sessionManager = SessionManager.inMemory()) {
 	let tool: RegisteredTool | undefined;
 	let command: RegisteredCommand | undefined;
@@ -196,20 +162,30 @@ describe("pi-patchcraft extension", () => {
 		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-tool-"));
 		temporaryDirectories.push(cwd);
 		await writeFile(path.join(cwd, "value.txt"), "before\n");
+		const updates: Array<AgentToolResult<PatchResultDetails | undefined>> = [];
 		const result = await tool?.execute(
 			"call-1",
 			{
 				patch: "*** Begin Patch\n*** Update File: value.txt\n@@\n-before\n+after\n*** End Patch",
 			},
 			undefined,
-			undefined,
+			(update) => updates.push(update),
 			{ cwd },
 		);
+		assert.deepEqual(updates, [
+			{ content: [{ type: "text", text: "Validating patch…" }], details: undefined },
+			{ content: [{ type: "text", text: "Applying patch to 1 file(s)…" }], details: undefined },
+		]);
 		assert.match(result?.content[0]?.text ?? "", /Patch applied to 1 file/);
 		const details = result?.details;
 		assert.ok(details && "changes" in details);
 		assert.deepEqual(Object.keys(details).sort(), ["added", "changes", "fuzz", "removed"]);
+		assert.equal(details.added, 1);
+		assert.equal(details.removed, 1);
+		assert.equal(details.fuzz, 0);
 		const change = details.changes[0];
+		assert.match(change?.displayDiff ?? "", /before/);
+		assert.match(change?.displayDiff ?? "", /after/);
 		assert.deepEqual(Object.keys(change ?? {}).sort(), [
 			"added",
 			"displayDiff",
@@ -412,82 +388,9 @@ describe("pi-patchcraft extension", () => {
 		assert.deepEqual(harness.tools, ["read", "bash", "apply_patch"]);
 	});
 
-	it("renders standalone success titles and expanded diffs without Progressive Tools", () => {
-		initTheme("dark", false);
+	it("leaves rendering to Pi or its native renderer resolver", () => {
 		const { tool } = extensionHarness([]);
-		assert.equal(tool.renderShell, "self");
-		assert.ok(tool.renderCall);
-		assert.ok(tool.renderResult);
-		const title = tool.renderCall(
-			{ patch: "*** Begin Patch\n*** Update File: old.ts\n*** Move to: new.ts\n*** End Patch" },
-			renderTheme,
-			{ isError: false },
-		);
-		assert.equal(stripVTControlCharacters(title.render(80).join("\n")).trim(), "Move old.ts → new.ts");
-		const result = { content: [{ type: "text", text: "Patch applied." }], details: renderDetails };
-		assert.deepEqual(
-			tool.renderResult(result, { expanded: false, isPartial: false }, renderTheme, { isError: false }).render(80),
-			[],
-		);
-		const expanded = stripVTControlCharacters(
-			tool
-				.renderResult(result, { expanded: true, isPartial: false }, renderTheme, { isError: false })
-				.render(80)
-				.join("\n"),
-		);
-		assert.match(expanded, /Move old\.ts → new\.ts \(\+1 -1\)/);
-		assert.match(expanded, /old/);
-		assert.match(expanded, /new/);
-	});
-
-	it("renders complete standalone errors collapsed and expanded, even without details", () => {
-		const { tool } = extensionHarness([]);
-		assert.ok(tool.renderResult);
-		for (const expanded of [false, true]) {
-			for (const details of [undefined, renderDetails]) {
-				const result = {
-					content: [
-						{ type: "text", text: "Cannot apply patch" },
-						{ type: "image" },
-						{ type: "text", text: "Rollback failed: denied" },
-					],
-					details,
-				};
-				const output = tool
-					.renderResult(result, { expanded, isPartial: false }, renderTheme, { isError: true })
-					.render(80)
-					.join("\n");
-				assert.ok(output.includes("\x1b[31m"));
-				assert.ok(output.includes("\x1b[41m"));
-				const plain = stripVTControlCharacters(output);
-				assert.match(plain, /Cannot apply patch/);
-				assert.match(plain, /Rollback failed: denied/);
-				assert.doesNotMatch(plain, /move old\.ts/);
-			}
-		}
-		const fallback = tool.renderResult(
-			{ content: [], details: undefined },
-			{ expanded: true, isPartial: false },
-			renderTheme,
-			{ isError: true },
-		);
-		assert.equal(stripVTControlCharacters(fallback.render(80).join("\n")).trim(), "Patch failed.");
-	});
-
-	it("renders standalone partial updates and default progress text", () => {
-		const { tool } = extensionHarness([]);
-		assert.ok(tool.renderResult);
-		for (const expanded of [false, true]) {
-			for (const text of ["Validating patch…", "Applying patch to 1 file(s)…", undefined]) {
-				const content = text ? [{ type: "text", text }] : [];
-				const output = tool
-					.renderResult({ content, details: undefined }, { expanded, isPartial: true }, renderTheme, { isError: false })
-					.render(80)
-					.join("\n");
-				assert.ok(output.includes("\x1b[33m"));
-				assert.equal(stripVTControlCharacters(output).trim(), text ?? "Applying patch…");
-			}
-		}
+		for (const key of ["renderCall", "renderResult", "renderShell"]) assert.equal(Object.hasOwn(tool, key), false, key);
 	});
 
 	it("declares grammar constrained sampling for capable models", () => {
