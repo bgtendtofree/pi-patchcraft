@@ -9,12 +9,14 @@ import {
 	type ExtensionAPI,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import type { TSchema } from "typebox";
+import { Check } from "typebox/value";
 import piPatchcraft from "../src/index.ts";
 import type { PatchResultDetails } from "../src/types.ts";
 
 interface RegisteredTool {
 	name: string;
-	parameters?: unknown;
+	parameters: TSchema;
 	outputSchema?: { properties?: Record<string, unknown> };
 	constrainedSampling?: { type: string; variants: { openai_lark?: string } };
 	annotations?: {
@@ -23,7 +25,6 @@ interface RegisteredTool {
 		idempotentHint: boolean;
 		openWorldHint: boolean;
 	};
-	prepareArguments?(args: unknown): { patch: string };
 	execute(
 		toolCallId: string,
 		params: { patch: string },
@@ -158,7 +159,6 @@ describe("pi-patchcraft extension", () => {
 		assert.deepEqual(activeTools, ["read", "edit", "write", "bash", "external_tool"]);
 		assert.equal(toolSwitches, 2);
 
-		assert.deepEqual(tool?.prepareArguments?.({ input: "patch" }), { patch: "patch" });
 		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-tool-"));
 		temporaryDirectories.push(cwd);
 		await writeFile(path.join(cwd, "value.txt"), "before\n");
@@ -207,6 +207,16 @@ describe("pi-patchcraft extension", () => {
 		await assert.rejects(tool.execute("empty", { patch: "" }, undefined, undefined, { cwd }), /patch is required/);
 		await assert.rejects(tool.execute("invalid", { patch: "invalid" }, undefined, undefined, { cwd }));
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
+	});
+
+	it("uses the patch parameter schema without an argument compatibility shim", () => {
+		const { tool } = extensionHarness([]);
+		const patch = "*** Begin Patch\n*** Add File: value.txt\n+value\n*** End Patch";
+		assert.equal(Object.hasOwn(tool, "prepareArguments"), false);
+		assert.equal(Check(tool.parameters, { patch }), true);
+		for (const input of [undefined, null, patch, { input: patch }, { patchText: patch }, { patch: 1 }]) {
+			assert.equal(Check(tool.parameters, input), false);
+		}
 	});
 
 	it("supports session-scoped automatic, forced-on, and forced-off modes", async () => {

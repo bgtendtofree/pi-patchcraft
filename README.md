@@ -48,11 +48,11 @@ Tool input uses Pi's public JSON tool API:
 }
 ```
 
-Compatibility input names `input` and `patchText`, plus raw string arguments, are normalized before schema validation.
+Tool arguments must use `{ patch: string }`. The aliases `input` and `patchText`, and raw string arguments, are not accepted.
 
 The tool declares an output schema, so a [`codemode`](https://pi.dev/docs/codemode) script receives `{ changes, added, removed, fuzz }` from `tools.apply_patch(...)` instead of the text result. The model-facing content is unchanged.
 
-On OpenAI endpoints that support custom tools with grammar formats (GPT-5 and later on OpenAI, Azure OpenAI, Codex, and compatible gateways), Patchcraft declares the [Codex `apply_patch` grammar](https://github.com/openai/codex/blob/main/codex-rs/tools/src/tool_apply_patch.lark). Those models write the patch as raw text instead of a JSON-escaped string. Everywhere else Pi falls back to the same JSON-schema function tool, so Patchcraft does not detect model capabilities itself.
+On OpenAI endpoints that support custom tools with grammar formats (GPT-5 and later on OpenAI, Azure OpenAI, Codex, and compatible gateways), Patchcraft declares the [Codex `apply_patch` grammar](https://github.com/openai/codex/blob/main/codex-rs/tools/src/tool_apply_patch.lark). Those models write the patch as raw text instead of a JSON-escaped string; Pi maps that text to the `patch` parameter before validation. Everywhere else Pi falls back to the same JSON-schema function tool, so Patchcraft does not detect model capabilities itself.
 
 ## Tool mode
 
@@ -69,7 +69,7 @@ Mode changes persist in current session across reloads, resumes, and tree naviga
 
 Before changing tools, Patchcraft saves the active-tool baseline as session metadata. Reloads, resumes, tree navigation, and forks restore it from the active branch. Only `edit` and `write` that were enabled in that baseline are restored; other tools retain their current enabled/disabled state. New sessions capture their own baseline.
 
-Older sessions without baseline metadata use the current active tools conservatively. If those tools were already replaced by Patchcraft, the original `edit`/`write` choices cannot be recovered reliably, so neither is guessed back on. Start a new session with the desired editing tools enabled to establish a fresh baseline.
+When the active branch has no valid baseline metadata, Patchcraft captures the current active tools. This also handles first-time loading and tree navigation before the metadata entry. If those tools were already replaced by Patchcraft, the original `edit`/`write` choices cannot be recovered reliably, so neither is guessed back on. Start a new session with the desired editing tools enabled to establish a fresh baseline.
 
 For virtual models, Pi's `ctx.model` is the selected virtual model, not the physical model dispatched for each request. `auto` checks that selected id only; it does not detect GPT through routing. Use `/patchcraft on` to enable patches for a router with a non-`gpt-*` id.
 
@@ -118,7 +118,7 @@ Custom operation titles, right-aligned patch metrics, and formatted per-file dif
 
 ## Development
 
-Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.0.1.
+Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.0.4.
 
 ```bash
 mise install
@@ -146,10 +146,12 @@ Development and package smoke tests pin:
 
 - Node.js 24.19.0 through mise
 - npm locked dependencies
-- Pi 1.0.1
+- Pi 1.0.4
 - TypeScript 7
 
 Pi runtime dependencies remain `"*"` peer dependencies.
+
+Pi 1.0.4 needs no Patchcraft execution API changes. Its codemode loadout now includes each tool's `promptGuidelines`, so Patchcraft's existing editing guidance remains available when codemode hides direct tool declarations. Grammar sampling, structured results, file mutation queues, and native rendering remain unchanged.
 
 ## License
 

@@ -20,16 +20,6 @@ interface PatchcraftModeState {
 	mode: PatchcraftMode;
 }
 
-function normalizeArguments(args: unknown): { patch: string } {
-	if (typeof args === "string") return { patch: args };
-	if (typeof args !== "object" || args === null) return { patch: "" };
-	const values = args as { patch?: unknown; input?: unknown; patchText?: unknown };
-	for (const value of [values.patch, values.input, values.patchText]) {
-		if (typeof value === "string") return { patch: value };
-	}
-	return { patch: "" };
-}
-
 function resultDetails(plan: PatchPlan): PatchResultDetails {
 	return {
 		changes: plan.changes.map(({ operation, path, targetPath, displayDiff, added, removed, fuzz }) => ({
@@ -85,7 +75,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	function syncTools(ctx: ExtensionContext): void {
 		if (!baselineTools) {
 			// Pi restores the already-replaced loadout on resume/reload. Persist before replacing it.
-			// ponytail: legacy sessions have no provenance; keep current tools rather than guess edit/write.
+			// Without saved baseline metadata, capture current tools rather than guess edit/write.
 			const tools = pi.getActiveTools();
 			pi.appendEntry(baselineEntryType, { tools });
 			baselineTools = tools;
@@ -148,7 +138,6 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		},
 		// Codemode scripts receive this shape instead of the text content.
 		outputSchema: patchResultSchema,
-		prepareArguments: normalizeArguments,
 		executionMode: "sequential",
 		// Capable models write the patch as raw text instead of a JSON-escaped string. Pi falls back
 		// to the JSON-schema function tool on providers without grammar constrained sampling.

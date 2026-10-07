@@ -13,7 +13,7 @@ Patchcraft provides Pi with a transactional Codex-style `apply_patch` tool. Pres
 - TypeScript 7, strict mode, ES2024
 - Formatting and linting: Biome
 - Tests: Node.js `node:test`
-- Pi development baseline: `@earendil-works/pi-coding-agent` 1.0.1
+- Pi development baseline: `@earendil-works/pi-coding-agent` 1.0.4
 
 Pi loads the TypeScript files directly. Runtime source and tests use separate TypeScript configs.
 
@@ -41,7 +41,7 @@ Keep `index.ts` thin. Put pure parsing, matching, and path logic in focused modu
 ## Patch Language Contract
 
 - Public tool name remains `apply_patch`.
-- Public schema remains `{ patch: string }`; compatibility normalization may accept `input`, `patchText`, and raw strings.
+- Public schema remains `{ patch: string }`. Do not add input aliases or argument compatibility shims; Pi maps raw grammar input to `patch` before schema validation.
 - Keep `patchResultSchema` mirroring `PatchResultDetails`; `codemode` scripts receive it as the tool's `structuredContent`.
 - Keep the parameter schema to exactly one required string property. Pi's grammar constrained sampling requires it and rejects every request on grammar-capable models otherwise, so `src/grammar.ts` and `patchParameters` must stay in sync.
 - Support Add, Delete, Update, optional Move, stacked `@@` context, `*** End of File`, and multi-file envelopes.
@@ -119,7 +119,7 @@ pi -e ./src/index.ts
 - Parser changes: test valid operations plus malformed envelopes and lines.
 - Path changes: test relative, absolute, home-relative, parent, and symlinked paths.
 - Apply changes: test preflight, no-op rejection, fuzzy matching, moves, source drift, and rollback behavior.
-- Tool wiring changes: test registration, argument normalization, model switching, and error signaling.
+- Tool wiring changes: test registration, argument validation, model switching, and error signaling.
 - Presentation changes: assert native-renderer fallback, progress updates, and unmodified structured results; do not reintroduce self-rendering or adapter tests.
 - Keep coverage thresholds passing; do not lower them to accommodate untested behavior.
 
