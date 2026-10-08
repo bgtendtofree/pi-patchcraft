@@ -118,7 +118,7 @@ Custom operation titles, right-aligned patch metrics, and formatted per-file dif
 
 ## Development
 
-Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.0.4.
+Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.1.0.
 
 ```bash
 mise install
@@ -146,12 +146,31 @@ Development and package smoke tests pin:
 
 - Node.js 24.19.0 through mise
 - npm locked dependencies
-- Pi 1.0.4
+- Pi 1.1.0
 - TypeScript 7
 
 Pi runtime dependencies remain `"*"` peer dependencies.
 
-Pi 1.0.4 needs no Patchcraft execution API changes. Its codemode loadout now includes each tool's `promptGuidelines`, so Patchcraft's existing editing guidance remains available when codemode hides direct tool declarations. Grammar sampling, structured results, file mutation queues, and native rendering remain unchanged.
+Pi 1.1.0 needs no Patchcraft execution API changes. Grammar sampling, structured results, file mutation queues, and codemode prompt guidelines remain unchanged.
+
+Relevant Pi 1.1.0 additions:
+
+| Feature / API | Patchcraft impact |
+|---|---|
+| `--tools +name,-name` | Adjusts default tools without repeating the full list. Patchcraft captures the resulting baseline, preserves tools such as `codemode`, and never restores baseline-disabled `edit`/`write`. |
+| `tool_execution_end.durationMs` and render-context `durationMs` | Pi records execution time; event consumers and renderers can use it without adding timing to Patchcraft's result schema. Render-context duration is absent while running or for older results. |
+| Render-context `outputPad` | Pi applies configured output padding to native tool output. Patchcraft has no self-rendered shell to adapt. |
+| `agent_settled.aborted` | Integrations can distinguish cancellation from normal settlement. Patchcraft still uses the execution `AbortSignal` and best-effort rollback, not this notification event. |
+| Codemode output separation | Multiple text items gain `==> text N/M <==` markers; console output is grouped separately. `tools.apply_patch()` still resolves to the same structured result. |
+| OSC 7501 program status | Supported terminals receive Pi's working, blocked, done, or failed status automatically; no Patchcraft hook is needed. |
+
+For example, enable codemode while excluding Pi's `write` tool:
+
+```bash
+pi -e ./src/index.ts --tools +codemode,-write
+```
+
+This changes tool selection, not filesystem permissions: `apply_patch` can still add and update files. `/patchcraft off` restores only the baseline editing tools.
 
 ## License
 

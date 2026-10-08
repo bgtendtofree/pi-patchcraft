@@ -318,6 +318,23 @@ describe("pi-patchcraft extension", () => {
 		}
 	});
 
+	it("preserves codemode and disabled write in a CLI-style adjusted baseline", async () => {
+		const baseline = ["read", "bash", "edit", "codemode"];
+		const initial = extensionHarness(baseline);
+		initial.emit("session_start");
+		assert.deepEqual(initial.tools, ["read", "bash", "codemode", "apply_patch"]);
+
+		const reloaded = extensionHarness(initial.tools, initial.context.sessionManager);
+		reloaded.emit("session_start", "reload");
+		assert.deepEqual(reloaded.tools, initial.tools);
+		await reloaded.mode("off");
+		assert.deepEqual(reloaded.tools, baseline);
+		await reloaded.mode("auto");
+		reloaded.context.model = { id: "claude-haiku-5-5", provider: "anthropic" };
+		reloaded.emit("model_select");
+		assert.deepEqual(reloaded.tools, baseline);
+	});
+
 	it("resets mode and baseline for a new session", async () => {
 		const harness = extensionHarness(["read", "edit", "bash"]);
 		harness.emit("session_start");
