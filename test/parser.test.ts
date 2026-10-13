@@ -23,6 +23,7 @@ describe("parsePatch", () => {
 				chunks: [
 					{
 						contexts: ["marker"],
+						contextLineIndices: [],
 						oldLines: ["before"],
 						newLines: ["after"],
 						endOfFile: false,
@@ -31,6 +32,25 @@ describe("parsePatch", () => {
 			},
 			{ type: "delete", path: "gone.txt" },
 		]);
+	});
+
+	it("records context line indices", () => {
+		const [operation] = parsePatch(`*** Begin Patch
+*** Update File: value.txt
+@@
+ keep
+-old
++new
+*** End Patch`);
+		assert.equal(operation?.type, "update");
+		if (operation?.type !== "update") return;
+		assert.deepEqual(operation.chunks[0], {
+			contexts: [],
+			contextLineIndices: [[0, 0]],
+			oldLines: ["keep", "old"],
+			newLines: ["keep", "new"],
+			endOfFile: false,
+		});
 	});
 
 	it("supports EOF markers", () => {

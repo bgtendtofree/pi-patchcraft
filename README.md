@@ -54,6 +54,8 @@ The tool declares an output schema, so a [`codemode`](https://pi.dev/docs/codemo
 
 On OpenAI endpoints that support custom tools with grammar formats (GPT-5 and later on OpenAI, Azure OpenAI, Codex, and compatible gateways), Patchcraft declares the [Codex `apply_patch` grammar](https://github.com/openai/codex/blob/main/codex-rs/tools/src/tool_apply_patch.lark). Those models write the patch as raw text instead of a JSON-escaped string; Pi maps that text to the `patch` parameter before validation. Everywhere else Pi falls back to the same JSON-schema function tool, so Patchcraft does not detect model capabilities itself.
 
+Content handling follows Codex: a context-less addition appends at end of file, lines parsed as context keep their original terminators (mixed line endings survive), inserted lines use the file's first line ending, and an update always terminates the final line. A leading BOM is preserved.
+
 ## Tool mode
 
 Patchcraft defaults to automatic mode: `gpt-*` models receive `apply_patch` in place of Pi `edit` and `write`; other models keep Pi's standard editing tools.
@@ -77,7 +79,7 @@ For virtual models, Pi's `ctx.model` is the selected virtual model, not the phys
 
 Patchcraft intentionally fails instead of guessing:
 
-- `Add File` target must not exist.
+- `Add File` creates the file, or overwrites an existing one like Codex; the previous content is captured for rollback.
 - `Update File` and `Delete File` targets must exist and be regular files.
 - Move target must not exist.
 - Paths resolve like Pi's built-in file tools; filesystem access follows process permissions.

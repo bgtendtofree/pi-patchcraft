@@ -80,6 +80,7 @@ export function parsePatch(patchText: string): PatchOperation[] {
 
 				const oldLines: string[] = [];
 				const newLines: string[] = [];
+				const contextLineIndices: Array<[number, number]> = [];
 				let parsedLines = 0;
 				let endOfFile = false;
 				while (index < endIndex) {
@@ -94,6 +95,7 @@ export function parsePatch(patchText: string): PatchOperation[] {
 					const prefix = changeLine[0];
 					const value = changeLine.slice(1);
 					if (prefix === " ") {
+						contextLineIndices.push([oldLines.length, newLines.length]);
 						oldLines.push(value);
 						newLines.push(value);
 					} else if (prefix === "-") oldLines.push(value);
@@ -105,7 +107,7 @@ export function parsePatch(patchText: string): PatchOperation[] {
 					index++;
 				}
 				if (parsedLines === 0) throw new Error("Update hunk has no change lines");
-				chunks.push({ contexts, oldLines, newLines, endOfFile });
+				chunks.push({ contexts, contextLineIndices, oldLines, newLines, endOfFile });
 			}
 
 			if (chunks.length === 0 && moveTo === undefined) {

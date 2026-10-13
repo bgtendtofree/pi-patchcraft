@@ -24,6 +24,8 @@ export interface PatchChunk {
 	contexts: string[];
 	oldLines: string[];
 	newLines: string[];
+	/** (old index, new index) pairs for lines parsed as context, so their terminators survive mixed endings. */
+	contextLineIndices: Array<[number, number]>;
 	endOfFile: boolean;
 }
 

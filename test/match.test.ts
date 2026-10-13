@@ -4,7 +4,7 @@ import { applyChunks, splitBom } from "../src/match.ts";
 import type { PatchChunk } from "../src/types.ts";
 
 function chunk(overrides: Partial<PatchChunk> = {}): PatchChunk {
-	return { contexts: [], oldLines: [], newLines: [], endOfFile: false, ...overrides };
+	return { contexts: [], contextLineIndices: [], oldLines: [], newLines: [], endOfFile: false, ...overrides };
 }
 
 describe("applyChunks", () => {
@@ -33,9 +33,28 @@ describe("applyChunks", () => {
 		assert.equal(result.content, "a\nmarker\nc\n");
 	});
 
-	it("inserts pure additions at end of file when requested", () => {
+	it("appends context-less additions at end of file like Codex", () => {
+		const result = applyChunks("before\nmarker\nafter\n", "value.txt", [
+			chunk({ contexts: ["marker"], newLines: ["inserted"] }),
+		]);
+		assert.equal(result.content, "before\nmarker\nafter\ninserted\n");
+	});
+
+	it("appends a context-free addition at end of file when requested", () => {
 		const result = applyChunks("a\nb\n", "value.txt", [chunk({ newLines: ["tail"], endOfFile: true })]);
 		assert.equal(result.content, "a\nb\ntail\n");
+	});
+
+	it("keeps context lines untouched so mixed line endings survive", () => {
+		const result = applyChunks("keep\r\nb\n", "value.txt", [
+			chunk({ oldLines: ["keep", "b"], newLines: ["keep", "c"], contextLineIndices: [[0, 0]] }),
+		]);
+		assert.equal(result.content, "keep\r\nc\r\n");
+	});
+
+	it("adds a trailing newline to an unterminated last line like Codex", () => {
+		const result = applyChunks("before\nafter", "value.txt", [chunk({ oldLines: ["after"], newLines: ["changed"] })]);
+		assert.equal(result.content, "before\nchanged\n");
 	});
 
 	it("throws when expected lines are missing", () => {

@@ -48,6 +48,8 @@ Keep `index.ts` thin. Put pure parsing, matching, and path logic in focused modu
 - Keep the parameter schema to exactly one required string property. Pi's grammar constrained sampling requires it and rejects every request on grammar-capable models otherwise, so `src/grammar.ts` and `patchParameters` must stay in sync.
 - Support Add, Delete, Update, optional Move, stacked `@@` context, `*** End of File`, and multi-file envelopes.
 - Reject two operations that resolve to the same file in one envelope (Codex parity, `openai/codex#37867`): a repeated `*** Update File:` header is invalid, and a move destination colliding with any other source or destination is rejected as well. That destination check is stricter than Codex main (`openai/codex#53409`).
+- `Add File` creates or overwrites a target, matching Codex; a pre-existing file is captured as `before` for rollback.
+- Follow Codex content semantics: a context-less addition appends at end of file, lines parsed as context keep their original endings, inserted lines use the file's first line ending, and an update always terminates the final line.
 - Reject malformed lines instead of silently skipping them.
 - Keep model-visible tool descriptions concise. Do not inject the full grammar into Pi's system prompt unless evidence shows it is required.
 - Patch paths follow Pi file-tool behavior: relative paths resolve from active workspace; absolute, home-relative, and `file://` paths are accepted.
@@ -59,7 +61,7 @@ Changes touching patch execution must preserve all of these:
 1. Parse and plan every operation before the first mutation.
 2. Validate operation preconditions and conflicting source/destination paths during planning.
 3. Acquire Pi file mutation queues in stable sorted path order.
-4. Revalidate source contents and destination absence after locks are acquired.
+4. Revalidate source contents after locks are acquired; for moves also require the destination to stay absent. `Add File` overwrites an existing target, so it revalidates the captured previous content instead.
 5. Write through a temporary file in the destination directory, preserve mode when available, then rename.
 6. Roll back completed operations in reverse order when a later operation fails.
 7. Attempt to restore the currently failing operation when it may have partially mutated state.
@@ -76,7 +78,7 @@ Context matching progresses from exact to increasingly fuzzy forms:
 3. Trim surrounding whitespace
 4. Unicode compatibility, quote, dash, and special-space normalization
 
-Preserve fuzz accounting. Prefer failure over adding broader or ambiguous matching.
+Content positioning follows Codex: context-less additions append at end of file, context lines keep their terminators, and an update terminates the final line. Preserve fuzz accounting. Prefer failure over adding broader or ambiguous matching.
 
 ## Tool Rendering
 

@@ -55,7 +55,7 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 		const state = await readState(absolutePath);
 
 		if (operation.type === "add") {
-			if (state) throw new Error(`Add File target already exists: ${operation.path}`);
+			// Codex creates or overwrites an Add File target; a pre-existing file is captured for rollback.
 			changes.push(
 				createChange({
 					operation: "add",
@@ -63,9 +63,9 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 					targetPath: operation.path,
 					absolutePath,
 					absoluteTargetPath: absolutePath,
-					before: undefined,
+					before: state?.content,
 					after: Buffer.from(operation.content),
-					mode: undefined,
+					mode: state?.mode,
 					fuzz: 0,
 				}),
 			);
@@ -92,8 +92,7 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 
 		// Strip a leading BOM before matching, like Pi's edit tool: models never emit it in a patch.
 		const { bom, text } = splitBom(state.content.toString("utf8"));
-		const updated =
-			operation.chunks.length === 0 ? { content: text, fuzz: 0 } : applyChunks(text, operation.path, operation.chunks);
+		const updated = applyChunks(text, operation.path, operation.chunks);
 		const targetPath = operation.moveTo ?? operation.path;
 		const absoluteTargetPath = await resolvePatchPath(cwd, targetPath);
 		if (absoluteTargetPath !== absolutePath && (await readState(absoluteTargetPath))) {

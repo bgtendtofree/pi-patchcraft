@@ -65,7 +65,7 @@ describe("patch planning and application", () => {
 		await assert.rejects(readFile(path.join(cwd, "old.txt")));
 	});
 
-	it("inserts pure additions after context instead of at end of file", async () => {
+	it("appends context-less additions at end of file like Codex", async () => {
 		const cwd = await workspace();
 		const target = path.join(cwd, "value.txt");
 		await writeFile(target, "before\nmarker\nafter\n");
@@ -74,7 +74,7 @@ describe("patch planning and application", () => {
 			"*** Begin Patch\n*** Update File: value.txt\n@@ marker\n+inserted\n*** End Patch",
 		);
 		await applyPatchPlan(plan);
-		assert.equal(await readFile(target, "utf8"), "before\nmarker\ninserted\nafter\n");
+		assert.equal(await readFile(target, "utf8"), "before\nmarker\nafter\ninserted\n");
 	});
 
 	it("preserves patch order for pure additions at the same position", async () => {
@@ -89,16 +89,16 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(target, "utf8"), "base\nfirst\nsecond\n");
 	});
 
-	it("inserts into an empty file without a leading newline", async () => {
+	it("inserts into an empty file and adds a trailing newline like Codex", async () => {
 		const cwd = await workspace();
 		const target = path.join(cwd, "empty.txt");
 		await writeFile(target, "");
 		const plan = await planPatch(cwd, "*** Begin Patch\n*** Update File: empty.txt\n@@\n+hello\n*** End Patch");
 		await applyPatchPlan(plan);
-		assert.equal(await readFile(target, "utf8"), "hello");
+		assert.equal(await readFile(target, "utf8"), "hello\n");
 	});
 
-	it("preserves line endings and final newline state", async () => {
+	it("preserves line endings and adds a trailing newline like Codex", async () => {
 		const cwd = await workspace();
 		const crlfTarget = path.join(cwd, "crlf.txt");
 		const noFinalNewlineTarget = path.join(cwd, "no-final-newline.txt");
@@ -119,7 +119,7 @@ describe("patch planning and application", () => {
 		);
 		await applyPatchPlan(plan);
 		assert.equal(await readFile(crlfTarget, "utf8"), "changed\r\nafter\r\n");
-		assert.equal(await readFile(noFinalNewlineTarget, "utf8"), "before\nchanged");
+		assert.equal(await readFile(noFinalNewlineTarget, "utf8"), "before\nchanged\n");
 	});
 
 	it("strips a leading BOM for matching and preserves it on write", async () => {
@@ -210,14 +210,24 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(path.join(cwd, "update.txt"), "utf8"), "before\n");
 	});
 
+	it("creates or overwrites a file with Add File like Codex, capturing old content", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "existing.txt");
+		await writeFile(target, "old\n");
+		const overwrite = await planPatch(cwd, "*** Begin Patch\n*** Add File: existing.txt\n+new\n*** End Patch");
+		assert.equal(overwrite.changes[0]?.before?.toString("utf8"), "old\n");
+		await applyPatchPlan(overwrite);
+		assert.equal(await readFile(target, "utf8"), "new\n");
+
+		const create = await planPatch(cwd, "*** Begin Patch\n*** Add File: fresh.txt\n+fresh\n*** End Patch");
+		assert.equal(create.changes[0]?.before, undefined);
+		await applyPatchPlan(create);
+		assert.equal(await readFile(path.join(cwd, "fresh.txt"), "utf8"), "fresh\n");
+	});
+
 	it("rejects precondition failures and conflicting paths", async () => {
 		const cwd = await workspace();
 		await mkdir(path.join(cwd, "dir"));
-		await writeFile(path.join(cwd, "existing.txt"), "x\n");
-		await assert.rejects(
-			planPatch(cwd, "*** Begin Patch\n*** Add File: existing.txt\n+y\n*** End Patch"),
-			/already exists/,
-		);
 		await assert.rejects(
 			planPatch(cwd, "*** Begin Patch\n*** Delete File: missing.txt\n*** End Patch"),
 			/does not exist/,
