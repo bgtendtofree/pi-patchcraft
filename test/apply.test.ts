@@ -173,6 +173,43 @@ describe("patch planning and application", () => {
 		await assert.rejects(readFile(path.join(cwd, "real/nested/new.txt")));
 	});
 
+	it("rejects duplicate resolved paths and repeated headers like Codex", async () => {
+		const cwd = await workspace();
+		// openai/codex#37867: `duplicate.txt` and `./duplicate.txt` resolve to the same file.
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Add File: duplicate.txt
++first
+*** Add File: ./duplicate.txt
++second
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		await writeFile(path.join(cwd, "update.txt"), "before\n");
+		// Codex rejects a second `*** Update File:` header for the same path; multiple hunks belong
+		// in one Update File block as stacked `@@` chunks.
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Update File: update.txt
+@@
+-before
++one
+*** Update File: update.txt
+@@
+-before
++two
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		assert.equal(await readFile(path.join(cwd, "update.txt"), "utf8"), "before\n");
+	});
+
 	it("rejects precondition failures and conflicting paths", async () => {
 		const cwd = await workspace();
 		await mkdir(path.join(cwd, "dir"));

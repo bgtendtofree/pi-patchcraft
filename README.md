@@ -81,7 +81,7 @@ Patchcraft intentionally fails instead of guessing:
 - `Update File` and `Delete File` targets must exist and be regular files.
 - Move target must not exist.
 - Paths resolve like Pi's built-in file tools; filesystem access follows process permissions.
-- Conflicting operations touching the same source or destination are rejected.
+- Conflicting operations touching the same source or destination are rejected. Two operations that resolve to the same file are rejected like Codex `multiple operations target`, so a repeated `*** Update File:` header is invalid; put multiple hunks in one block as stacked `@@` chunks. Rejecting a colliding move destination is stricter than Codex main ([openai/codex#53409](https://github.com/openai/codex/issues/53409)).
 - Paths through symlinked parent directories are canonicalized before conflict checks and mutation locking.
 - No-op updates are rejected.
 - Source content is revalidated after mutation queues are acquired.

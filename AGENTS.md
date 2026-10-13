@@ -47,6 +47,7 @@ Keep `index.ts` thin. Put pure parsing, matching, and path logic in focused modu
 - Keep `patchResultSchema` mirroring `PatchResultDetails`; `codemode` scripts receive it as the tool's `structuredContent`.
 - Keep the parameter schema to exactly one required string property. Pi's grammar constrained sampling requires it and rejects every request on grammar-capable models otherwise, so `src/grammar.ts` and `patchParameters` must stay in sync.
 - Support Add, Delete, Update, optional Move, stacked `@@` context, `*** End of File`, and multi-file envelopes.
+- Reject two operations that resolve to the same file in one envelope (Codex parity, `openai/codex#37867`): a repeated `*** Update File:` header is invalid, and a move destination colliding with any other source or destination is rejected as well. That destination check is stricter than Codex main (`openai/codex#53409`).
 - Reject malformed lines instead of silently skipping them.
 - Keep model-visible tool descriptions concise. Do not inject the full grammar into Pi's system prompt unless evidence shows it is required.
 - Patch paths follow Pi file-tool behavior: relative paths resolve from active workspace; absolute, home-relative, and `file://` paths are accepted.
