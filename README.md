@@ -118,7 +118,7 @@ Custom operation titles, right-aligned patch metrics, and formatted per-file dif
 
 ## Development
 
-Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.1.0.
+Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.2.0.
 
 ```bash
 mise install
@@ -146,14 +146,23 @@ Development and package smoke tests pin:
 
 - Node.js 24.19.0 through mise
 - npm locked dependencies
-- Pi 1.1.0
+- Pi 1.2.0
 - TypeScript 7
 
 Pi runtime dependencies remain `"*"` peer dependencies.
 
-Pi 1.1.0 needs no Patchcraft execution API changes. Grammar sampling, structured results, file mutation queues, and codemode prompt guidelines remain unchanged.
+Pi 1.2.0 needs no Patchcraft execution API changes. Grammar sampling, structured results, file mutation queues, and codemode prompt guidelines remain unchanged.
 
-Relevant Pi 1.1.0 additions:
+Relevant Pi 1.2.0 changes:
+
+| Feature / API | Patchcraft impact |
+|---|---|
+| `ToolDefinition.reachesTools` | Declares which tools a tool that orchestrates others may reach. `apply_patch` reaches no tools, so it is neither needed nor set. |
+| `ToolNamespace.aliases` | Extra lookup names for codemode namespaces. Patchcraft registers no namespace. |
+| `before_agent_start` union on `messageType` and busy-during-start | The event now fires for `pi.sendMessage(..., { triggerTurn: true })` runs and carries either `prompt`/`images` or a custom `message`. Patchcraft's handler ignores the event body and calls `syncTools(ctx)`, so it stays correct. Patchcraft never calls `pi.sendMessage()`/`pi.sendUserMessage()` during start, so the new busy semantics do not apply. |
+| Codemode declaration constraints and elapsed/total timing | Codemode-only presentation; Patchcraft's `structuredContent` for `tools.apply_patch()` is unchanged. |
+
+Relevant Pi 1.1.0 additions (already accommodated):
 
 | Feature / API | Patchcraft impact |
 |---|---|
