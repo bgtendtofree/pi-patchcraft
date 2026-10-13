@@ -61,6 +61,7 @@ function extensionHarness(tools: string[], sessionManager = SessionManager.inMem
 	};
 	const harness = {
 		tools: [...tools],
+		switches: 0,
 		context,
 		get tool() {
 			assert.ok(tool);
@@ -93,6 +94,7 @@ function extensionHarness(tools: string[], sessionManager = SessionManager.inMem
 					.getBranch()
 					.some((entry) => entry.type === "custom" && entry.customType === "patchcraft-baseline-tools"),
 			);
+			harness.switches++;
 			harness.tools = [...names];
 		},
 		appendEntry(customType: string, data: unknown) {
@@ -108,62 +110,39 @@ afterEach(async () => {
 
 describe("pi-patchcraft extension", () => {
 	it("registers and executes apply_patch", async () => {
-		let tool: RegisteredTool | undefined;
-		const handlers = new Map<string, (event: unknown, ctx: unknown) => void>();
-		let activeTools = ["read", "edit", "write", "bash"];
-		let toolSwitches = 0;
-		const pi = {
-			registerTool(value: RegisteredTool) {
-				tool = value;
-			},
-			on(name: string, handler: (event: unknown, ctx: unknown) => void) {
-				handlers.set(name, handler);
-			},
-			getActiveTools() {
-				return [...activeTools];
-			},
-			setActiveTools(names: string[]) {
-				toolSwitches++;
-				activeTools = [...names];
-			},
-			registerCommand() {},
-			appendEntry() {},
-		} as unknown as ExtensionAPI;
-
-		piPatchcraft(pi);
-		assert.equal(tool?.name, "apply_patch");
-		assert.deepEqual(tool?.annotations, {
+		const harness = extensionHarness(["read", "edit", "write", "bash"]);
+		const { tool } = harness;
+		assert.equal(tool.name, "apply_patch");
+		assert.deepEqual(tool.annotations, {
 			readOnlyHint: false,
 			destructiveHint: true,
 			idempotentHint: false,
 			openWorldHint: false,
 		});
-		handlers.get("session_start")?.(
-			{},
-			{
-				model: { id: "gpt-5", provider: "openai" },
-				sessionManager: { getBranch: () => [] },
-			},
-		);
-		assert.deepEqual(activeTools, ["read", "bash", "apply_patch"]);
-		assert.equal(toolSwitches, 1);
-		handlers.get("model_select")?.({}, { model: { id: "openai/gpt-5.6-luna", provider: "openrouter" } });
-		handlers.get("before_agent_start")?.({}, { model: { id: "gpt-5", provider: "openai" } });
-		assert.deepEqual(activeTools, ["read", "bash", "apply_patch"]);
-		assert.equal(toolSwitches, 1);
-		activeTools.splice(2, 0, "external_tool");
-		handlers.get("model_select")?.({}, { model: { id: "claude-sonnet-4", provider: "anthropic" } });
-		assert.deepEqual(activeTools, ["read", "edit", "write", "bash", "external_tool"]);
-		assert.equal(toolSwitches, 2);
-		handlers.get("model_select")?.({}, { model: { id: "codex-platform-model", provider: "custom" } });
-		assert.deepEqual(activeTools, ["read", "edit", "write", "bash", "external_tool"]);
-		assert.equal(toolSwitches, 2);
+		harness.emit("session_start");
+		assert.deepEqual(harness.tools, ["read", "bash", "apply_patch"]);
+		assert.equal(harness.switches, 1);
+		harness.context.model = { id: "openai/gpt-5.6-luna", provider: "openrouter" };
+		harness.emit("model_select");
+		harness.context.model = { id: "gpt-5", provider: "openai" };
+		harness.emit("before_agent_start");
+		assert.deepEqual(harness.tools, ["read", "bash", "apply_patch"]);
+		assert.equal(harness.switches, 1);
+		harness.tools.splice(2, 0, "external_tool");
+		harness.context.model = { id: "claude-sonnet-4", provider: "anthropic" };
+		harness.emit("model_select");
+		assert.deepEqual(harness.tools, ["read", "edit", "write", "bash", "external_tool"]);
+		assert.equal(harness.switches, 2);
+		harness.context.model = { id: "codex-platform-model", provider: "custom" };
+		harness.emit("model_select");
+		assert.deepEqual(harness.tools, ["read", "edit", "write", "bash", "external_tool"]);
+		assert.equal(harness.switches, 2);
 
 		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-tool-"));
 		temporaryDirectories.push(cwd);
 		await writeFile(path.join(cwd, "value.txt"), "before\n");
 		const updates: Array<AgentToolResult<PatchResultDetails | undefined>> = [];
-		const result = await tool?.execute(
+		const result = await tool.execute(
 			"call-1",
 			{
 				patch: "*** Begin Patch\n*** Update File: value.txt\n@@\n-before\n+after\n*** End Patch",
@@ -201,9 +180,8 @@ describe("pi-patchcraft extension", () => {
 		// declared outputSchema exactly.
 		assert.deepEqual(result?.structuredContent, details);
 		assert.deepEqual(Object.keys(result?.structuredContent ?? {}).sort(), ["added", "changes", "fuzz", "removed"]);
-		assert.deepEqual(Object.keys(tool?.outputSchema?.properties ?? {}).sort(), ["added", "changes", "fuzz", "removed"]);
+		assert.deepEqual(Object.keys(tool.outputSchema?.properties ?? {}).sort(), ["added", "changes", "fuzz", "removed"]);
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
-		assert.ok(tool);
 		await assert.rejects(tool.execute("empty", { patch: "" }, undefined, undefined, { cwd }), /patch is required/);
 		await assert.rejects(tool.execute("invalid", { patch: "invalid" }, undefined, undefined, { cwd }));
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");

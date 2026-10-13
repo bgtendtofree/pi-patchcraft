@@ -122,6 +122,18 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(noFinalNewlineTarget, "utf8"), "before\nchanged");
 	});
 
+	it("strips a leading BOM for matching and preserves it on write", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "bom.txt");
+		await writeFile(target, "\uFEFFbefore\nafter\n");
+		const plan = await planPatch(
+			cwd,
+			"*** Begin Patch\n*** Update File: bom.txt\n@@\n-before\n+changed\n*** End Patch",
+		);
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(target, "utf8"), "\uFEFFchanged\nafter\n");
+	});
+
 	it("supports absolute, parent, and symlink paths like Pi file tools", async () => {
 		const cwd = await workspace();
 		const outside = await workspace();

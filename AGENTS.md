@@ -22,7 +22,9 @@ Pi loads the TypeScript files directly. Runtime source and tests use separate Ty
 - `src/index.ts` — tool registration, model-based activation, Pi lifecycle wiring
 - `src/parser.ts` — Codex patch envelope and operation parser
 - `src/paths.ts` — Pi-compatible path normalization and resolution
-- `src/apply.ts` — planning, matching, locking, atomic writes, rollback
+- `src/match.ts` — pure context matching, chunk application, BOM splitting
+- `src/tools.ts` — pure loadout reconciliation and model detection
+- `src/apply.ts` — planning, locking, atomic writes, rollback
 - `src/types.ts` — shared patch, plan, result detail types, plus the codemode result schema
 - `test/*.test.ts` — mirrored Node.js test suites
 

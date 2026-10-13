@@ -1,112 +1,14 @@
 import { chmod, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { generateDiffString, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { applyChunks, splitBom } from "./match.ts";
 import { parsePatch } from "./parser.ts";
 import { resolvePatchPath } from "./paths.ts";
-import type { PatchChunk, PatchPlan, PlannedFileChange } from "./types.ts";
-
-interface Match {
-	index: number;
-	fuzz: 0 | 1 | 100 | 10000;
-}
+import type { PatchPlan, PlannedFileChange } from "./types.ts";
 
 interface FileState {
 	content: Buffer;
 	mode: number;
-}
-
-interface SplitContent {
-	lines: string[];
-	lineEnding: "\n" | "\r\n" | "\r";
-	hasFinalLineEnding: boolean;
-}
-
-function normalizeLine(value: string): string {
-	return value
-		.normalize("NFKC")
-		.trim()
-		.replace(/[‐‑‒–—―−]/g, "-")
-		.replace(/[‘’‚‛]/g, "'")
-		.replace(/[“”„‟]/g, '"')
-		.replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
-}
-
-function findSequence(lines: string[], pattern: string[], start: number, eof: boolean): Match | undefined {
-	if (pattern.length === 0) return { index: start, fuzz: 0 };
-	const last = lines.length - pattern.length;
-	const first = eof ? Math.max(0, last) : start;
-	const variants: Array<{ fuzz: Match["fuzz"]; prepare: (value: string) => string }> = [
-		{ fuzz: 0, prepare: (value) => value },
-		{ fuzz: 1, prepare: (value) => value.trimEnd() },
-		{ fuzz: 100, prepare: (value) => value.trim() },
-		{ fuzz: 10000, prepare: normalizeLine },
-	];
-
-	for (const variant of variants) {
-		const expected = pattern.map(variant.prepare);
-		for (let index = first; index <= last; index++) {
-			if (expected.every((value, offset) => variant.prepare(lines[index + offset] ?? "") === value)) {
-				return { index, fuzz: variant.fuzz };
-			}
-		}
-	}
-	return undefined;
-}
-
-function splitContent(content: string): SplitContent {
-	const matchedLineEnding = content.match(/\r\n|\r|\n/)?.[0];
-	const lineEnding = matchedLineEnding === "\r\n" || matchedLineEnding === "\r" ? matchedLineEnding : "\n";
-	const hasFinalLineEnding = /(?:\r\n|\r|\n)$/.test(content);
-	const lines = content === "" ? [] : content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-	if (hasFinalLineEnding) lines.pop();
-	return { lines, lineEnding, hasFinalLineEnding };
-}
-
-function applyChunks(content: string, filePath: string, chunks: PatchChunk[]): { content: string; fuzz: number } {
-	const { lines, lineEnding, hasFinalLineEnding } = splitContent(content);
-	const replacements: Array<{ start: number; oldLength: number; newLines: string[]; order: number }> = [];
-	let cursor = 0;
-	let fuzz = 0;
-
-	for (const chunk of chunks) {
-		for (const context of chunk.contexts) {
-			const contextMatch = findSequence(lines, [context], cursor, false);
-			if (!contextMatch) throw new Error(`Failed to find context '${context}' in ${filePath}`);
-			cursor = contextMatch.index + 1;
-			fuzz += contextMatch.fuzz;
-		}
-
-		if (chunk.oldLines.length === 0) {
-			const insertionPoint = chunk.endOfFile || chunk.contexts.length === 0 ? lines.length : cursor;
-			replacements.push({
-				start: insertionPoint,
-				oldLength: 0,
-				newLines: chunk.newLines,
-				order: replacements.length,
-			});
-			continue;
-		}
-
-		const match = findSequence(lines, chunk.oldLines, cursor, chunk.endOfFile);
-		if (!match) {
-			throw new Error(`Failed to find expected lines in ${filePath}:\n${chunk.oldLines.join("\n")}`);
-		}
-		replacements.push({
-			start: match.index,
-			oldLength: chunk.oldLines.length,
-			newLines: chunk.newLines,
-			order: replacements.length,
-		});
-		cursor = match.index + chunk.oldLines.length;
-		fuzz += match.fuzz;
-	}
-
-	const next = [...lines];
-	for (const replacement of replacements.sort((left, right) => right.start - left.start || right.order - left.order)) {
-		next.splice(replacement.start, replacement.oldLength, ...replacement.newLines);
-	}
-	const finalLineEnding = hasFinalLineEnding ? lineEnding : "";
-	return { content: `${next.join(lineEnding)}${finalLineEnding}`, fuzz };
 }
 
 async function readState(absolutePath: string): Promise<FileState | undefined> {
@@ -188,16 +90,16 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 			continue;
 		}
 
+		// Strip a leading BOM before matching, like Pi's edit tool: models never emit it in a patch.
+		const { bom, text } = splitBom(state.content.toString("utf8"));
 		const updated =
-			operation.chunks.length === 0
-				? { content: state.content.toString("utf8"), fuzz: 0 }
-				: applyChunks(state.content.toString("utf8"), operation.path, operation.chunks);
+			operation.chunks.length === 0 ? { content: text, fuzz: 0 } : applyChunks(text, operation.path, operation.chunks);
 		const targetPath = operation.moveTo ?? operation.path;
 		const absoluteTargetPath = await resolvePatchPath(cwd, targetPath);
 		if (absoluteTargetPath !== absolutePath && (await readState(absoluteTargetPath))) {
 			throw new Error(`Move target already exists: ${targetPath}`);
 		}
-		const after = Buffer.from(updated.content);
+		const after = Buffer.from(`${bom}${updated.content}`);
 		if (absoluteTargetPath === absolutePath && after.equals(state.content)) {
 			throw new Error(`Update produced no changes: ${operation.path}`);
 		}

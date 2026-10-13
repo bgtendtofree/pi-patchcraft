@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { applyPatchPlan, planPatch } from "./apply.ts";
 import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
+import { isPatchcraftModel, reconcileActiveTools } from "./tools.ts";
 import { type PatchPlan, type PatchResultDetails, patchResultSchema } from "./types.ts";
 
 const patchParameters = Type.Object({
@@ -10,7 +11,6 @@ const patchParameters = Type.Object({
 	}),
 });
 
-const managedTools = new Set(["apply_patch", "edit", "write"]);
 const modeEntryType = "patchcraft-mode";
 const baselineEntryType = "patchcraft-baseline-tools";
 
@@ -44,8 +44,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	function wantsPatchcraft(ctx: ExtensionContext): boolean {
 		if (mode === "on") return true;
 		if (mode === "off") return false;
-		const id = ctx.model?.id.toLowerCase() ?? "";
-		return id.split("/").pop()?.startsWith("gpt-") ?? false;
+		return isPatchcraftModel(ctx.model?.id);
 	}
 
 	function restoreState(ctx: ExtensionContext): void {
@@ -81,25 +80,11 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			baselineTools = tools;
 		}
 		const current = pi.getActiveTools();
-		const usePatchcraft = wantsPatchcraft(ctx);
-		const desiredManaged = new Set<string>();
-		if (usePatchcraft) desiredManaged.add("apply_patch");
-		else {
-			if (baselineTools.includes("edit")) desiredManaged.add("edit");
-			if (baselineTools.includes("write")) desiredManaged.add("write");
-		}
-
-		const currentUnmanaged = current.filter((name) => !managedTools.has(name));
-		const currentUnmanagedSet = new Set(currentUnmanaged);
-		const next = baselineTools.filter(
-			(name) =>
-				(managedTools.has(name) && desiredManaged.has(name)) ||
-				(!managedTools.has(name) && currentUnmanagedSet.has(name)),
-		);
-		for (const name of currentUnmanaged) {
-			if (!next.includes(name)) next.push(name);
-		}
-		if (usePatchcraft && !next.includes("apply_patch")) next.push("apply_patch");
+		const next = reconcileActiveTools({
+			baseline: baselineTools,
+			current,
+			usePatchcraft: wantsPatchcraft(ctx),
+		});
 		if (next.length !== current.length || next.some((name, index) => name !== current[index])) pi.setActiveTools(next);
 	}
 
@@ -154,6 +139,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 				details: undefined,
 			});
 			await applyPatchPlan(plan, signal);
+			const details = resultDetails(plan);
 			return {
 				content: [
 					{
@@ -168,8 +154,8 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 						].join("\n"),
 					},
 				],
-				details: resultDetails(plan),
-				structuredContent: resultDetails(plan),
+				details,
+				structuredContent: details,
 			};
 		},
 	});
