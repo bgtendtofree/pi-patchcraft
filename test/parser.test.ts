@@ -53,6 +53,19 @@ describe("parsePatch", () => {
 		});
 	});
 
+	it("keeps a space-only context line before the first change", () => {
+		const [operation] = parsePatch("*** Begin Patch\n*** Update File: value.txt\n \n-old\n+new\n*** End Patch");
+		assert.equal(operation?.type, "update");
+		if (operation?.type !== "update") return;
+		assert.deepEqual(operation.chunks[0], {
+			contexts: [],
+			contextLineIndices: [[0, 0]],
+			oldLines: ["", "old"],
+			newLines: ["", "new"],
+			endOfFile: false,
+		});
+	});
+
 	it("supports EOF markers", () => {
 		const [operation] = parsePatch(`*** Begin Patch
 *** Update File: value.txt

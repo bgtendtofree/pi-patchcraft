@@ -35,6 +35,9 @@ export interface PlannedFileChange {
 	targetPath: string;
 	absolutePath: string;
 	absoluteTargetPath: string;
+	/** Conflict-check and mutation-lock identity. Case-folded on case-insensitive filesystems. */
+	identityPath: string;
+	identityTargetPath: string;
 	before: Buffer | undefined;
 	after: Buffer | undefined;
 	mode: number | undefined;

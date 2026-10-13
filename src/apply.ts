@@ -1,9 +1,12 @@
-import { chmod, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { isUtf8 } from "node:buffer";
+import { randomUUID } from "node:crypto";
+import type { FileHandle } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, rename, rm, unlink } from "node:fs/promises";
 import path from "node:path";
 import { generateDiffString, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { applyChunks, splitBom } from "./match.ts";
 import { parsePatch } from "./parser.ts";
-import { resolvePatchPath } from "./paths.ts";
+import { directoryUsesCaseInsensitiveNames, resolveExistingIdentity, resolvePatchPath } from "./paths.ts";
 import type { PatchPlan, PlannedFileChange } from "./types.ts";
 
 interface FileState {
@@ -37,9 +40,55 @@ function createChange(input: Omit<PlannedFileChange, "displayDiff" | "added" | "
 function assertUniqueChanges(changes: PlannedFileChange[]): void {
 	const touched = new Set<string>();
 	for (const change of changes) {
-		for (const candidate of new Set([change.absolutePath, change.absoluteTargetPath])) {
+		for (const candidate of new Set([change.identityPath, change.identityTargetPath])) {
 			if (touched.has(candidate)) throw new Error(`Patch contains conflicting operations for ${candidate}`);
 			touched.add(candidate);
+		}
+	}
+}
+
+async function existingDirectoryFor(startPath: string): Promise<string> {
+	let current = startPath;
+	while (true) {
+		try {
+			await lstat(current);
+			return current;
+		} catch (error) {
+			if (!(typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT")) throw error;
+			const parent = path.dirname(current);
+			if (parent === current) return current;
+			current = parent;
+		}
+	}
+}
+
+/**
+ * Distinct spellings that would be one file on a case-insensitive filesystem must be rejected.
+ * Only envelopes with such a candidate group are probed, so a lone new file never lists its
+ * directory and an execute-only directory still accepts normal adds. A probe that cannot decide
+ * fails closed for that potential conflict.
+ */
+async function assertNoCaseAliasConflicts(changes: PlannedFileChange[]): Promise<void> {
+	const groups = new Map<string, string[]>();
+	for (const change of changes) {
+		for (const value of [change.absolutePath, change.absoluteTargetPath]) {
+			const key = value.toLowerCase();
+			const list = groups.get(key);
+			if (!list) groups.set(key, [value]);
+			else if (!list.includes(value)) list.push(value);
+		}
+	}
+	const probes = new Map<string, Promise<boolean | undefined>>();
+	for (const originals of groups.values()) {
+		if (originals.length < 2) continue;
+		for (const original of originals) {
+			const directory = await existingDirectoryFor(path.dirname(original));
+			let probe = probes.get(directory);
+			if (!probe) {
+				probe = directoryUsesCaseInsensitiveNames(directory);
+				probes.set(directory, probe);
+			}
+			if ((await probe) !== false) throw new Error(`Patch contains conflicting operations for ${original}`);
 		}
 	}
 }
@@ -53,6 +102,10 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 		signal?.throwIfAborted();
 		const absolutePath = await resolvePatchPath(cwd, operation.path);
 		const state = await readState(absolutePath);
+		// Identity is separate from the operational path: existing files use realpath, missing files
+		// keep their exact spelling. Potential case aliases are handled in one pass after planning, so
+		// a normal add never causes a directory listing.
+		const identityPath = state ? ((await resolveExistingIdentity(absolutePath)) ?? absolutePath) : absolutePath;
 
 		if (operation.type === "add") {
 			// Codex creates or overwrites an Add File target; a pre-existing file is captured for rollback.
@@ -63,6 +116,8 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 					targetPath: operation.path,
 					absolutePath,
 					absoluteTargetPath: absolutePath,
+					identityPath,
+					identityTargetPath: identityPath,
 					before: state?.content,
 					after: Buffer.from(operation.content),
 					mode: state?.mode,
@@ -81,6 +136,8 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 					targetPath: operation.path,
 					absolutePath,
 					absoluteTargetPath: absolutePath,
+					identityPath,
+					identityTargetPath: identityPath,
 					before: state.content,
 					after: undefined,
 					mode: state.mode,
@@ -90,13 +147,27 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 			continue;
 		}
 
+		// Buffers can hold arbitrary bytes. Text matching would replace invalid sequences with U+FFFD
+		// and corrupt untouched content, so reject unsupported encodings before any mutation.
+		if (!isUtf8(state.content)) throw new Error(`Patch source is not valid UTF-8: ${operation.path}`);
+
 		// Strip a leading BOM before matching, like Pi's edit tool: models never emit it in a patch.
 		const { bom, text } = splitBom(state.content.toString("utf8"));
 		const updated = applyChunks(text, operation.path, operation.chunks);
+
 		const targetPath = operation.moveTo ?? operation.path;
-		const absoluteTargetPath = await resolvePatchPath(cwd, targetPath);
-		if (absoluteTargetPath !== absolutePath && (await readState(absoluteTargetPath))) {
-			throw new Error(`Move target already exists: ${targetPath}`);
+		let absoluteTargetPath = absolutePath;
+		let identityTargetPath = identityPath;
+		if (operation.moveTo !== undefined) {
+			const resolvedTarget = await resolvePatchPath(cwd, targetPath);
+			// `absolutePath` is the parent-resolved source spelling. Only a literal rename-to-self keeps
+			// the in-place behavior; any other spelling of an existing file is still a rejected target,
+			// including case-insensitive aliases of the source itself.
+			if (resolvedTarget !== absolutePath) {
+				if (await readState(resolvedTarget)) throw new Error(`Move target already exists: ${targetPath}`);
+				absoluteTargetPath = resolvedTarget;
+				identityTargetPath = resolvedTarget;
+			}
 		}
 		const after = Buffer.from(`${bom}${updated.content}`);
 		if (absoluteTargetPath === absolutePath && after.equals(state.content)) {
@@ -109,6 +180,8 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 				targetPath,
 				absolutePath,
 				absoluteTargetPath,
+				identityPath,
+				identityTargetPath,
 				before: state.content,
 				after,
 				mode: state.mode,
@@ -118,6 +191,7 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 	}
 
 	assertUniqueChanges(changes);
+	await assertNoCaseAliasConflicts(changes);
 	return {
 		changes,
 		added: changes.reduce((sum, change) => sum + change.added, 0),
@@ -126,18 +200,57 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 	};
 }
 
+function describeError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function isErrorCode(error: unknown, code: string): boolean {
+	return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+async function openTemporary(directory: string, mode: number): Promise<{ handle: FileHandle; temporary: string }> {
+	for (let attempt = 0; attempt < 5; attempt++) {
+		// Short, target-independent name: a long target basename must not overflow the name limit.
+		const temporary = path.join(directory, `.patchcraft-${process.pid}-${randomUUID()}.tmp`);
+		try {
+			return { handle: await open(temporary, "wx", mode), temporary };
+		} catch (error) {
+			if (isErrorCode(error, "EEXIST")) continue;
+			throw error;
+		}
+	}
+	throw new Error(`Could not create a temporary file in ${directory}`);
+}
+
 async function writeAtomic(absolutePath: string, content: Buffer, mode?: number): Promise<void> {
 	await mkdir(path.dirname(absolutePath), { recursive: true });
-	const temporary = path.join(
-		path.dirname(absolutePath),
-		`.${path.basename(absolutePath)}.patchcraft-${process.pid}-${Math.random().toString(16).slice(2)}`,
-	);
-	await writeFile(temporary, content);
+	// Exclusive, restrictive creation first: the temporary is never more permissive than the target
+	// and never replaces a file this operation did not create.
+	const { handle, temporary } = await openTemporary(path.dirname(absolutePath), mode ?? 0o666);
+	let closed = false;
 	try {
-		if (mode !== undefined) await chmod(temporary, mode);
+		await handle.writeFile(content);
+		if (mode !== undefined) await handle.chmod(mode);
+		await handle.close();
+		closed = true;
 		await rename(temporary, absolutePath);
 	} catch (error) {
-		await rm(temporary, { force: true });
+		const cleanupFailures: string[] = [];
+		if (!closed) {
+			try {
+				await handle.close();
+			} catch (closeError) {
+				cleanupFailures.push(`close: ${describeError(closeError)}`);
+			}
+		}
+		try {
+			await rm(temporary, { force: true });
+		} catch (cleanupError) {
+			cleanupFailures.push(`remove ${temporary}: ${describeError(cleanupError)}`);
+		}
+		if (cleanupFailures.length > 0) {
+			throw new Error(`${describeError(error)}\nFailed to clean up temporary file: ${cleanupFailures.join("; ")}`);
+		}
 		throw error;
 	}
 }
@@ -158,6 +271,8 @@ async function rollbackChange(change: PlannedFileChange): Promise<void> {
 		await rm(change.absoluteTargetPath, { force: true });
 		return;
 	}
+	// Restore first, then remove the destination. A failed restore must never delete the destination:
+	// after a completed move the destination can be the only surviving copy of the content.
 	await writeAtomic(change.absolutePath, change.before, change.mode);
 	if (change.absoluteTargetPath !== change.absolutePath) await rm(change.absoluteTargetPath, { force: true });
 }
@@ -173,8 +288,14 @@ async function validatePlanState(plan: PatchPlan): Promise<void> {
 		const source = await readState(change.absolutePath);
 		if (change.before === undefined) {
 			if (source !== undefined) throw new Error(`Patch target changed before apply: ${change.path}`);
-		} else if (!source?.content.equals(change.before)) {
-			throw new Error(`Patch source changed before apply: ${change.path}`);
+		} else {
+			if (!source?.content.equals(change.before)) {
+				throw new Error(`Patch source changed before apply: ${change.path}`);
+			}
+			// Do not overwrite permissions the user changed after planning; reject instead of restoring.
+			if (change.mode !== undefined && source.mode !== undefined && (source.mode & 0o7777) !== (change.mode & 0o7777)) {
+				throw new Error(`Patch source permissions changed before apply: ${change.path}`);
+			}
 		}
 		if (change.absoluteTargetPath !== change.absolutePath && (await readState(change.absoluteTargetPath))) {
 			throw new Error(`Patch target changed before apply: ${change.targetPath}`);
@@ -182,8 +303,19 @@ async function validatePlanState(plan: PatchPlan): Promise<void> {
 	}
 }
 
+/**
+ * Keys Pi's mutation queue will use. For a target that does not exist Pi keys on the exact resolved
+ * path (`realpath` fails), so identity case-folding must not be used there. Existing files key on
+ * realpath, which `identityPath` already holds.
+ */
+function mutationQueueKeys(change: PlannedFileChange): string[] {
+	const source = change.before === undefined ? change.absolutePath : change.identityPath;
+	if (change.absoluteTargetPath === change.absolutePath) return [source];
+	return [source, change.absoluteTargetPath];
+}
+
 export async function applyPatchPlan(plan: PatchPlan, signal?: AbortSignal): Promise<void> {
-	const paths = [...new Set(plan.changes.flatMap((change) => [change.absolutePath, change.absoluteTargetPath]))].sort();
+	const paths = [...new Set(plan.changes.flatMap(mutationQueueKeys))].sort();
 
 	await withQueues(paths, 0, async () => {
 		signal?.throwIfAborted();
@@ -192,9 +324,12 @@ export async function applyPatchPlan(plan: PatchPlan, signal?: AbortSignal): Pro
 		let current: PlannedFileChange | undefined;
 		try {
 			for (const change of plan.changes) {
-				current = change;
+				// Check before marking a change in flight: an abort here has nothing to roll back.
 				signal?.throwIfAborted();
+				current = change;
 				await applyChange(change);
+				// The filesystem operation has settled; an abort during it must still undo this change.
+				signal?.throwIfAborted();
 				applied.push(change);
 				current = undefined;
 			}

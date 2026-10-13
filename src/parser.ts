@@ -61,7 +61,8 @@ export function parsePatch(patchText: string): PatchOperation[] {
 
 			const chunks: PatchChunk[] = [];
 			while (index < endIndex && !(lines[index] ?? "").startsWith("*** ")) {
-				if ((lines[index] ?? "").trim() === "") {
+				// Skip only truly empty separators. A space-only line is a valid context line, not a blank.
+				if ((lines[index] ?? "") === "") {
 					index++;
 					continue;
 				}

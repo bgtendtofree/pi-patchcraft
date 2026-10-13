@@ -54,7 +54,7 @@ The tool declares an output schema, so a [`codemode`](https://pi.dev/docs/codemo
 
 On OpenAI endpoints that support custom tools with grammar formats (GPT-5 and later on OpenAI, Azure OpenAI, Codex, and compatible gateways), Patchcraft declares the [Codex `apply_patch` grammar](https://github.com/openai/codex/blob/main/codex-rs/tools/src/tool_apply_patch.lark). Those models write the patch as raw text instead of a JSON-escaped string; Pi maps that text to the `patch` parameter before validation. Everywhere else Pi falls back to the same JSON-schema function tool, so Patchcraft does not detect model capabilities itself.
 
-Content handling follows Codex: a context-less addition appends at end of file, lines parsed as context keep their original terminators (mixed line endings survive), inserted lines use the file's first line ending, and an update always terminates the final line. A leading BOM is preserved.
+Content handling follows Codex: a context-less addition appends at end of file, lines parsed as context keep their original terminators (mixed line endings survive), inserted lines use the file's first line ending, and an update always terminates the final line. A leading BOM is preserved. `Update File` and `Move` require valid UTF-8 source content; a non-UTF-8 source is rejected during preflight, before any mutation, because text matching would corrupt untouched bytes. `Add File` and `Delete File` handle arbitrary bytes.
 
 ## Tool mode
 
@@ -81,12 +81,13 @@ Patchcraft intentionally fails instead of guessing:
 
 - `Add File` creates the file, or overwrites an existing one like Codex; the previous content is captured for rollback.
 - `Update File` and `Delete File` targets must exist and be regular files.
-- Move target must not exist.
+- Move target must not exist. A `*** Move to:` that resolves to any existing file is rejected, including another spelling of the source itself on a case-insensitive filesystem.
 - Paths resolve like Pi's built-in file tools; filesystem access follows process permissions.
 - Conflicting operations touching the same source or destination are rejected. Two operations that resolve to the same file are rejected like Codex `multiple operations target`, so a repeated `*** Update File:` header is invalid; put multiple hunks in one block as stacked `@@` chunks. Rejecting a colliding move destination is stricter than Codex main ([openai/codex#53409](https://github.com/openai/codex/issues/53409)).
-- Paths through symlinked parent directories are canonicalized before conflict checks and mutation locking.
+- Paths through symlinked parent directories are canonicalized before conflict checks and mutation locking. Genuinely case-sensitive filesystems keep `a.txt` and `A.txt` distinct. On a case-insensitive filesystem, case aliases of one existing file, and case aliases of a not-yet-created target, conflict instead of colliding after apply or deadlocking on the same native lock. Case sensitivity is probed read-only (creating no probe files) and only when an envelope actually contains a potential case-variant conflict, so a lone new file does not require listing its directory. Existing files key Pi's mutation queue on realpath; not-yet-created targets key on their exact resolved path, matching Pi. The folded identity is used only for conflict comparison; it never turns a rejected move into an in-place update.
 - No-op updates are rejected.
-- Source content is revalidated after mutation queues are acquired.
+- Source content is revalidated after mutation queues are acquired. Permissions changed between planning and apply are rejected rather than overwritten.
+- Per-file writes create a same-directory temporary with exclusive (`wx`) and target-restrictive mode, then rename. A failed temporary write is cleaned up; a cleanup or rollback failure is reported alongside the original error, and a temporary this operation did not create is never removed. Rollback restores the source before removing a move destination, so a destination that may be the only surviving copy is never deleted.
 
 Patch-level rollback handles ordinary runtime failures. It is not a crash-safe filesystem transaction: process termination or machine failure during mutation can still leave partial state.
 
