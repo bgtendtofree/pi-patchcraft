@@ -8,7 +8,7 @@
  * The grammar must keep matching the patch language `parser.ts` accepts. It requires exactly one
  * required string property in the tool parameters (here `patch`), or Pi rejects every request.
  */
-export const APPLY_PATCH_LARK_GRAMMAR = String.raw`start: begin_patch hunk+ end_patch
+export const APPLY_PATCH_LARK_GRAMMAR = `start: begin_patch hunk+ end_patch
 begin_patch: "*** Begin Patch" LF
 end_patch: "*** End Patch" LF?
 
