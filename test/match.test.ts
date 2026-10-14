@@ -26,6 +26,27 @@ describe("applyChunks", () => {
 		assert.equal(normalized.fuzz, 10000);
 	});
 
+	it("handles CR-only line endings", () => {
+		const result = applyChunks("before\rafter\r", "value.txt", [
+			chunk({ oldLines: ["before"], newLines: ["changed"] }),
+		]);
+		assert.equal(result.content, "changed\rafter\r");
+	});
+
+	it("matches a trailing empty line that stands for the final newline", () => {
+		const result = applyChunks("a\n", "value.txt", [
+			chunk({ oldLines: ["a", ""], newLines: ["a", "x"], contextLineIndices: [[0, 0]] }),
+		]);
+		assert.equal(result.content, "a\nx\n");
+	});
+
+	it("does not match compatibility-equal characters", () => {
+		assert.throws(
+			() => applyChunks("1\n", "value.txt", [chunk({ oldLines: ["①"], newLines: ["new"] })]),
+			/Failed to find expected lines/,
+		);
+	});
+
 	it("resolves a context marker before the change", () => {
 		const result = applyChunks("a\nmarker\nb\n", "value.txt", [
 			chunk({ contexts: ["marker"], oldLines: ["b"], newLines: ["c"] }),

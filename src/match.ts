@@ -38,7 +38,6 @@ export function splitBom(text: string): { bom: string; text: string } {
 
 function normalizeLine(value: string): string {
 	return value
-		.normalize("NFKC")
 		.trim()
 		.replace(/[‐‑‒–—―−]/g, "-")
 		.replace(/[‘’‚‛]/g, "'")

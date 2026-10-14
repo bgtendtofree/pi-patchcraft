@@ -1,7 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import type { FileHandle } from "node:fs/promises";
-import { lstat, mkdir, open, readFile, rename, rm, unlink } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, lstat, mkdir, open, readFile, rename, rm, unlink } from "node:fs/promises";
 import path from "node:path";
 import { generateDiffString, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { applyChunks, splitBom } from "./match.ts";
@@ -208,25 +208,27 @@ function isErrorCode(error: unknown, code: string): boolean {
 	return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
-async function openTemporary(directory: string, mode: number): Promise<{ handle: FileHandle; temporary: string }> {
-	for (let attempt = 0; attempt < 5; attempt++) {
-		// Short, target-independent name: a long target basename must not overflow the name limit.
-		const temporary = path.join(directory, `.patchcraft-${process.pid}-${randomUUID()}.tmp`);
-		try {
-			return { handle: await open(temporary, "wx", mode), temporary };
-		} catch (error) {
-			if (isErrorCode(error, "EEXIST")) continue;
-			throw error;
-		}
+/**
+ * A rename only needs write permission on the directory, so it would replace a read-only file that
+ * Pi's edit/write and Codex refuse. Require the same write permission an in-place write would need.
+ */
+async function assertReplaceable(absolutePath: string): Promise<void> {
+	try {
+		await access(absolutePath, constants.W_OK);
+	} catch (error) {
+		if (isErrorCode(error, "ENOENT")) return;
+		throw error;
 	}
-	throw new Error(`Could not create a temporary file in ${directory}`);
 }
 
 async function writeAtomic(absolutePath: string, content: Buffer, mode?: number): Promise<void> {
+	await assertReplaceable(absolutePath);
 	await mkdir(path.dirname(absolutePath), { recursive: true });
-	// Exclusive, restrictive creation first: the temporary is never more permissive than the target
-	// and never replaces a file this operation did not create.
-	const { handle, temporary } = await openTemporary(path.dirname(absolutePath), mode ?? 0o666);
+	// Short, target-independent name: a long target basename must not overflow the name limit.
+	// Exclusive creation (wx) keeps a target-restrictive mode and never replaces a file this operation
+	// did not create.
+	const temporary = path.join(path.dirname(absolutePath), `.patchcraft-${process.pid}-${randomUUID()}.tmp`);
+	const handle = await open(temporary, "wx", mode ?? 0o666);
 	let closed = false;
 	try {
 		await handle.writeFile(content);
@@ -339,18 +341,14 @@ export async function applyPatchPlan(plan: PatchPlan, signal?: AbortSignal): Pro
 				try {
 					await rollbackChange(current);
 				} catch (rollbackError) {
-					rollbackFailures.push(
-						`${current.targetPath}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-					);
+					rollbackFailures.push(`${current.targetPath}: ${describeError(rollbackError)}`);
 				}
 			}
 			for (const change of [...applied].reverse()) {
 				try {
 					await rollbackChange(change);
 				} catch (rollbackError) {
-					rollbackFailures.push(
-						`${change.targetPath}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-					);
+					rollbackFailures.push(`${change.targetPath}: ${describeError(rollbackError)}`);
 				}
 			}
 			const original = error instanceof Error ? error.message : String(error);

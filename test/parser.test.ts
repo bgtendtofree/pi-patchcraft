@@ -79,6 +79,11 @@ describe("parsePatch", () => {
 		assert.equal(operation.chunks[0]?.endOfFile, true);
 	});
 
+	it("trims trailing whitespace from a header path like Codex", () => {
+		const [operation] = parsePatch("*** Begin Patch\n*** Add File: new.txt \n+created\n*** End Patch");
+		assert.deepEqual(operation, { type: "add", path: "new.txt", content: "created\n" });
+	});
+
 	it("rejects empty and malformed patches", () => {
 		assert.throws(() => parsePatch("*** Begin Patch\n*** End Patch"), /Patch is empty/);
 		assert.throws(
@@ -89,6 +94,11 @@ describe("parsePatch", () => {
 			() => parsePatch("*** Begin Patch\n*** Add File: a.txt\ninvalid\n*** End Patch"),
 			/Add File lines must start/,
 		);
+		assert.throws(
+			() => parsePatch("*** Begin Patch\n*** Update File: a.txt\ngarbage\n*** End Patch"),
+			/Invalid update line/,
+		);
+		assert.throws(() => parsePatch("*** Begin Patch\n*** Add File: a.txt\n*** End Patch"), /has no content lines/);
 		assert.throws(
 			() => parsePatch("*** Begin Patch\n*** Frobnicate File: a.txt\n*** End Patch"),
 			/Unknown patch header/,

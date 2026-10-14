@@ -723,32 +723,50 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(other, "utf8"), "keep\n");
 	});
 
-	it("retries a temporary create that collides with an existing file", async () => {
-		const cwd = await workspace();
-		const target = path.join(cwd, "value.txt");
-		await writeFile(target, "before\n");
-		const plan = await planPatch(
-			cwd,
-			"*** Begin Patch\n*** Update File: value.txt\n@@\n-before\n+after\n*** End Patch",
-		);
-		const originalOpen = fs.open;
-		let collided = false;
-		fs.open = (async (filePath: string, flags: string, mode?: number) => {
-			if (path.basename(filePath).startsWith(".patchcraft-") && !collided) {
-				collided = true;
-				throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
-			}
-			return originalOpen(filePath, flags, mode);
-		}) as typeof fs.open;
-		syncBuiltinESMExports();
-		try {
-			await applyPatchPlan(plan);
-		} finally {
-			fs.open = originalOpen;
-			syncBuiltinESMExports();
+	it("refuses to overwrite a read-only file like Pi edit and Codex", {
+		skip: process.platform === "win32",
+	}, async (t) => {
+		if (process.getuid?.() === 0) {
+			t.skip("requires a non-root user for permission failures");
+			return;
 		}
-		assert.ok(collided);
-		assert.equal(await readFile(target, "utf8"), "after\n");
+		const cwd = await workspace();
+		const target = path.join(cwd, "read-only.txt");
+		await writeFile(target, "before\n");
+		await chmod(target, 0o444);
+		try {
+			const plan = await planPatch(
+				cwd,
+				"*** Begin Patch\n*** Update File: read-only.txt\n@@\n-before\n+after\n*** End Patch",
+			);
+			await assert.rejects(applyPatchPlan(plan), /EACCES|permission denied/);
+			assert.equal(await readFile(target, "utf8"), "before\n");
+		} finally {
+			await chmod(target, 0o644);
+		}
+	});
+
+	it("writes a moved read-only file because rename only needs directory permission", {
+		skip: process.platform === "win32",
+	}, async (t) => {
+		if (process.getuid?.() === 0) {
+			t.skip("requires a non-root user for permission failures");
+			return;
+		}
+		const cwd = await workspace();
+		const source = path.join(cwd, "source.txt");
+		await writeFile(source, "original\n");
+		await chmod(source, 0o444);
+		try {
+			const plan = await planPatch(
+				cwd,
+				"*** Begin Patch\n*** Update File: source.txt\n*** Move to: moved.txt\n*** End Patch",
+			);
+			await applyPatchPlan(plan);
+			assert.equal(await readFile(path.join(cwd, "moved.txt"), "utf8"), "original\n");
+		} finally {
+			await chmod(source, 0o644).catch(() => {});
+		}
 	});
 
 	it("reports a temporary cleanup failure without discarding the original error", async () => {

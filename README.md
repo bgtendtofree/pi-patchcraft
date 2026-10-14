@@ -15,7 +15,7 @@ Patchcraft gives GPT models their familiar Codex patch language. It validates th
 - Atomic per-file writes with mode preservation
 - Best-effort patch-level rollback
 - Concurrent source-change detection
-- Exact, whitespace-tolerant, and Unicode-normalized context matching
+- Exact, whitespace-tolerant, and punctuation-normalized context matching
 - Automatic `apply_patch` activation for `gpt-*` models
 - Grammar-constrained patch text on OpenAI models that support custom tools
 - Structured result for `codemode` scripts (`changes`, `added`, `removed`, `fuzz`)
@@ -82,11 +82,11 @@ Patchcraft intentionally fails instead of guessing:
 - `Add File` creates the file, or overwrites an existing one like Codex; the previous content is captured for rollback.
 - `Update File` and `Delete File` targets must exist and be regular files.
 - Move target must not exist. A `*** Move to:` that resolves to any existing file is rejected, including another spelling of the source itself on a case-insensitive filesystem.
-- Paths resolve like Pi's built-in file tools; filesystem access follows process permissions.
+- Paths resolve like Pi's built-in file tools, and header paths are trimmed of trailing whitespace like Codex; filesystem access follows process permissions.
 - Conflicting operations touching the same source or destination are rejected. Two operations that resolve to the same file are rejected like Codex `multiple operations target`, so a repeated `*** Update File:` header is invalid; put multiple hunks in one block as stacked `@@` chunks. Rejecting a colliding move destination is stricter than Codex main ([openai/codex#53409](https://github.com/openai/codex/issues/53409)).
 - Paths through symlinked parent directories are canonicalized before conflict checks and mutation locking. Genuinely case-sensitive filesystems keep `a.txt` and `A.txt` distinct. On a case-insensitive filesystem, case aliases of one existing file, and case aliases of a not-yet-created target, conflict instead of colliding after apply or deadlocking on the same native lock. Case sensitivity is probed read-only (creating no probe files) and only when an envelope actually contains a potential case-variant conflict, so a lone new file does not require listing its directory. Existing files key Pi's mutation queue on realpath; not-yet-created targets key on their exact resolved path, matching Pi. The folded identity is used only for conflict comparison; it never turns a rejected move into an in-place update.
 - No-op updates are rejected.
-- Source content is revalidated after mutation queues are acquired. Permissions changed between planning and apply are rejected rather than overwritten.
+- Source content is revalidated after mutation queues are acquired. Permissions changed between planning and apply are rejected rather than overwritten. A target that exists must also be writable: a read-only file is refused like Pi `edit`/`write` and Codex, instead of being replaced by the atomic rename.
 - Per-file writes create a same-directory temporary with exclusive (`wx`) and target-restrictive mode, then rename. A failed temporary write is cleaned up; a cleanup or rollback failure is reported alongside the original error, and a temporary this operation did not create is never removed. Rollback restores the source before removing a move destination, so a destination that may be the only surviving copy is never deleted.
 
 Patch-level rollback handles ordinary runtime failures. It is not a crash-safe filesystem transaction: process termination or machine failure during mutation can still leave partial state.

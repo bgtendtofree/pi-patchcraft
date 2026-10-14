@@ -1,9 +1,11 @@
 import type { PatchChunk, PatchOperation } from "./types.ts";
 
 function requirePath(value: string, header: string): string {
-	if (!value) throw new Error(`${header} requires a path`);
-	if (value.includes("\0")) throw new Error(`${header} path contains NUL`);
-	return value;
+	// Codex trims the header line, so trailing whitespace never becomes part of the path.
+	const trimmed = value.trimEnd();
+	if (!trimmed) throw new Error(`${header} requires a path`);
+	if (trimmed.includes("\0")) throw new Error(`${header} path contains NUL`);
+	return trimmed;
 }
 
 export function parsePatch(patchText: string): PatchOperation[] {

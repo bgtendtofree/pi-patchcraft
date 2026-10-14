@@ -76,7 +76,7 @@ Context matching progresses from exact to increasingly fuzzy forms:
 1. Exact line match
 2. Ignore trailing whitespace
 3. Trim surrounding whitespace
-4. Unicode compatibility, quote, dash, and special-space normalization
+4. Quote, dash, and special-space normalization
 
 Content positioning follows Codex: context-less additions append at end of file, context lines keep their terminators, and an update terminates the final line. Preserve fuzz accounting. Prefer failure over adding broader or ambiguous matching.
 
