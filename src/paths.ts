@@ -27,19 +27,43 @@ function flipCase(value: string): string {
 	);
 }
 
+/**
+ * Name spellings a case-insensitive filesystem may equate. Kept separate from Unicode
+ * normalization: a case-sensitive APFS is still normalization-insensitive, and vice versa.
+ */
+function caseVariants(name: string): string[] {
+	const variants = new Set<string>();
+	const lower = name.toLowerCase();
+	if (lower !== name) variants.add(lower);
+	const flipped = flipCase(name);
+	if (flipped !== name) variants.add(flipped);
+	return [...variants];
+}
+
+/** Name spellings a Unicode-normalization-insensitive filesystem may equate (NFC covers canonical equivalence). */
+function normalizationVariants(name: string): string[] {
+	const variants = new Set<string>();
+	for (const form of ["NFC", "NFD"] as const) {
+		const normalized = name.normalize(form);
+		if (normalized !== name) variants.add(normalized);
+	}
+	return [...variants];
+}
+
 function isSameEntry(left: Awaited<ReturnType<typeof lstat>>, right: Awaited<ReturnType<typeof lstat>>): boolean {
 	return left.ino === right.ino && left.dev === right.dev;
 }
 
 /**
- * Read-only, stateless probe for case-insensitive name lookup on the filesystem holding
- * `directory`.
- *
- * Returns `undefined` when it cannot decide (for example an unreadable mount root), so a caller can
- * fail closed only for a genuinely ambiguous potential conflict. It never creates a probe file and
- * never mutates anything.
+ * Read-only, stateless probe for one name-lookup axis on the filesystem holding `directory`. A name
+ * is equated only when a variant resolves to the same inode, so a filesystem that truly distinguishes
+ * a spelling reports `false`. Returns `undefined` when no existing name exercises the axis, so a
+ * caller can fail closed instead of borrowing the other axis' answer. Never creates a file.
  */
-export async function directoryUsesCaseInsensitiveNames(directory: string): Promise<boolean | undefined> {
+async function probeNameAliasing(
+	directory: string,
+	variants: (name: string) => string[],
+): Promise<boolean | undefined> {
 	try {
 		let entries: string[] | undefined;
 		try {
@@ -48,27 +72,30 @@ export async function directoryUsesCaseInsensitiveNames(directory: string): Prom
 			entries = undefined;
 		}
 		for (const entry of entries ?? []) {
-			const flipped = flipCase(entry);
-			if (flipped === entry) continue;
+			const names = variants(entry);
+			if (names.length === 0) continue;
 			const original = await tryLstat(path.join(directory, entry));
 			if (!original) continue;
-			const alternative = await tryLstat(path.join(directory, flipped));
-			return alternative !== undefined && isSameEntry(original, alternative);
+			// One decisive observation settles the whole directory.
+			for (const variant of names) {
+				const alternative = await tryLstat(path.join(directory, variant));
+				if (alternative !== undefined && isSameEntry(original, alternative)) return true;
+			}
+			return false;
 		}
 		// Fall back to the directory's own name. Stay on the same device: across a mount boundary the
-		// parent filesystem says nothing about this one.
+		// parent filesystem says nothing about this one. A variant that does not alias proves the
+		// filesystem is sensitive for that spelling; a name with no variant leaves the axis unknown.
 		let current = directory;
 		let currentStats = await tryLstat(current);
 		while (currentStats && current !== path.dirname(current)) {
 			const parent = path.dirname(current);
 			const parentStats = await tryLstat(parent);
 			if (!parentStats || parentStats.dev !== currentStats.dev) return undefined;
-			const name = path.basename(current);
-			const flipped = flipCase(name);
-			if (flipped !== name) {
-				const alternative = await tryLstat(path.join(parent, flipped));
+			for (const variant of variants(path.basename(current))) {
+				const alternative = await tryLstat(path.join(parent, variant));
 				if (alternative === undefined) return false;
-				return currentStats.ino === alternative.ino && currentStats.dev === alternative.dev;
+				if (currentStats.ino === alternative.ino && currentStats.dev === alternative.dev) return true;
 			}
 			current = parent;
 			currentStats = parentStats;
@@ -77,6 +104,16 @@ export async function directoryUsesCaseInsensitiveNames(directory: string): Prom
 	} catch {
 		return undefined;
 	}
+}
+
+/** Case-insensitive name lookup only; `undefined` when no existing name exercises case. */
+export async function directoryUsesCaseInsensitiveNames(directory: string): Promise<boolean | undefined> {
+	return probeNameAliasing(directory, caseVariants);
+}
+
+/** Unicode-normalization-insensitive name lookup only; `undefined` when no existing name exercises it. */
+export async function directoryUsesNormalizationInsensitiveNames(directory: string): Promise<boolean | undefined> {
+	return probeNameAliasing(directory, normalizationVariants);
 }
 
 /**
@@ -89,12 +126,26 @@ export async function resolveExistingIdentity(absolutePath: string): Promise<str
 	try {
 		return await realpath(absolutePath);
 	} catch (error) {
-		if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return undefined;
+		if (isMissing(error)) return undefined;
 		throw error;
 	}
 }
 
-export async function resolvePatchPath(cwd: string, input: string): Promise<string> {
+export interface ResolvedPatchPath {
+	/** Canonical path: the deepest existing ancestor's realpath plus the missing suffix. */
+	absolute: string;
+	/** Lexical path (`path.resolve(cwd, value)`) before any parent realpath, i.e. the submitted spelling. */
+	lexical: string;
+}
+
+/**
+ * Resolve both the canonical and the submitted (lexical) spelling of a patch path.
+ *
+ * Pi's mutation queue keys a not-yet-created target on its lexical resolved path (`realpath`
+ * fails), so Patchcraft must remember the same spelling to share that queue instead of locking on a
+ * canonical path Pi never uses for a missing file.
+ */
+export async function resolvePatchPathDetailed(cwd: string, input: string): Promise<ResolvedPatchPath> {
 	let value = input.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
 	if (value.startsWith("@")) value = value.slice(1);
 	if (!value) throw new Error("Patch path is empty");
@@ -104,11 +155,18 @@ export async function resolvePatchPath(cwd: string, input: string): Promise<stri
 		value = path.join(os.homedir(), value.slice(2));
 	}
 	if (value.startsWith("file://")) value = fileURLToPath(value);
-	const absolute = path.resolve(cwd, value);
-	let parent = path.dirname(absolute);
+	const lexical = path.resolve(cwd, value);
+	let parent = path.dirname(lexical);
 	while (true) {
 		try {
-			return path.join(await realpath(parent), path.relative(parent, path.dirname(absolute)), path.basename(absolute));
+			return {
+				absolute: path.join(
+					await realpath(parent),
+					path.relative(parent, path.dirname(lexical)),
+					path.basename(lexical),
+				),
+				lexical,
+			};
 		} catch (error) {
 			if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "ENOENT") {
 				throw error;
@@ -118,4 +176,8 @@ export async function resolvePatchPath(cwd: string, input: string): Promise<stri
 			parent = next;
 		}
 	}
+}
+
+export async function resolvePatchPath(cwd: string, input: string): Promise<string> {
+	return (await resolvePatchPathDetailed(cwd, input)).absolute;
 }

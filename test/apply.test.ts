@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import fs, { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import fs, { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { applyPatchPlan, planPatch } from "../src/apply.ts";
+import { directoryUsesCaseInsensitiveNames, directoryUsesNormalizationInsensitiveNames } from "../src/paths.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -29,6 +30,18 @@ async function isCaseInsensitive(directory: string): Promise<boolean> {
 	}
 }
 
+/** Probe on a throwaway workspace so a normalization probe never pollutes the test directory. */
+async function isNormalizationInsensitive(): Promise<boolean> {
+	const directory = await workspace();
+	await writeFile(path.join(directory, "caf\u00e9-probe.txt"), "probe\n");
+	try {
+		await stat(path.join(directory, "cafe\u0301-probe.txt"));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * A buffer that fails every write after the temporary file was created, without mocking the
  * filesystem: Node throws when asked to write a detached ArrayBuffer.
@@ -41,6 +54,32 @@ function detachedBuffer(): Buffer {
 
 async function temporaryFiles(directory: string): Promise<string[]> {
 	return (await readdir(directory)).filter((name) => name.startsWith(".patchcraft-"));
+}
+
+/**
+ * Replace readdir/lstat with a synthetic directory listing so a host that only exposes one default
+ * sensitivity pair can still exercise the other. `aliases` maps basenames to a shared inode; any
+ * other name falls through to the real filesystem so real directories still resolve.
+ */
+function installNameLookupMock(entries: string[], aliases: Map<string, number>): () => void {
+	const originalReaddir = fs.readdir;
+	const originalLstat = fs.lstat;
+	fs.readdir = (async () => entries) as unknown as typeof fs.readdir;
+	fs.lstat = (async (target: string) => {
+		const ino = aliases.get(path.basename(String(target)));
+		if (ino !== undefined) {
+			return { ino, dev: 1, isFile: () => true, isDirectory: () => false } as unknown as Awaited<
+				ReturnType<typeof stat>
+			>;
+		}
+		return originalLstat(target);
+	}) as typeof fs.lstat;
+	syncBuiltinESMExports();
+	return () => {
+		fs.readdir = originalReaddir;
+		fs.lstat = originalLstat;
+		syncBuiltinESMExports();
+	};
 }
 
 describe("patch planning and application", () => {
@@ -462,11 +501,181 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(path.join(cwd, "A.txt"), "utf8"), "upper\n");
 	});
 
+	it("rejects Unicode normalization aliases of not-yet-created move destinations", async (t) => {
+		const cwd = await workspace();
+		if (!(await isNormalizationInsensitive())) {
+			t.skip("normalization-sensitive filesystem");
+			return;
+		}
+		await writeFile(path.join(cwd, "first.txt"), "FIRST\n");
+		await writeFile(path.join(cwd, "second.txt"), "SECOND\n");
+		// The destinations live in a directory that does not exist yet; both spellings normalize to
+		// one file on this filesystem, so accepting them would silently drop the first move's content.
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Update File: first.txt
+*** Move to: nested/caf\u00e9.txt
+*** Update File: second.txt
+*** Move to: nested/cafe\u0301.txt
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		assert.equal(await readFile(path.join(cwd, "first.txt"), "utf8"), "FIRST\n");
+		assert.equal(await readFile(path.join(cwd, "second.txt"), "utf8"), "SECOND\n");
+		assert.deepEqual(await readdir(cwd), ["first.txt", "second.txt"]);
+	});
+
+	it("rejects Unicode normalization aliases of not-yet-created Add targets", async (t) => {
+		const cwd = await workspace();
+		if (!(await isNormalizationInsensitive())) {
+			t.skip("normalization-sensitive filesystem");
+			return;
+		}
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Add File: caf\u00e9.txt
++first
+*** Add File: cafe\u0301.txt
++second
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		// Planning is read-only detection: it must not have created anything.
+		assert.deepEqual(await readdir(cwd), []);
+	});
+
+	it("rejects Unicode normalization aliases of one existing file", async (t) => {
+		const cwd = await workspace();
+		if (!(await isNormalizationInsensitive())) {
+			t.skip("normalization-sensitive filesystem");
+			return;
+		}
+		await writeFile(path.join(cwd, "caf\u00e9.txt"), "old\n");
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Update File: caf\u00e9.txt
+@@
+-old
++one
+*** Update File: cafe\u0301.txt
+@@
+-old
++two
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		assert.equal(await readFile(path.join(cwd, "caf\u00e9.txt"), "utf8"), "old\n");
+	});
+
+	it("keeps distinct Unicode spellings when normalization sensitivity is proven", async (t) => {
+		const cwd = await workspace();
+		if (await isNormalizationInsensitive()) {
+			t.skip("normalization-insensitive filesystem");
+			return;
+		}
+		// Give the read-only probe a non-ASCII entry so normalization sensitivity is decidable instead
+		// of unknown; an unknown axis must fail closed and would reject these distinct names.
+		await writeFile(path.join(cwd, "probe-caf\u00e9.txt"), "probe\n");
+		const plan = await planPatch(
+			cwd,
+			`*** Begin Patch
+*** Add File: caf\u00e9.txt
++composed
+*** Add File: cafe\u0301.txt
++decomposed
+*** End Patch`,
+		);
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(path.join(cwd, "caf\u00e9.txt"), "utf8"), "composed\n");
+		assert.equal(await readFile(path.join(cwd, "cafe\u0301.txt"), "utf8"), "decomposed\n");
+	});
+
+	it("rejects a touched file that is an ancestor directory of another file before writing", async () => {
+		const cwd = await workspace();
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Add File: folder
++data
+*** Add File: folder/child.txt
++child
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		assert.deepEqual(await readdir(cwd), []);
+	});
+
+	it("rejects an ancestor conflict for a `..`-prefixed basename", async () => {
+		const cwd = await workspace();
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Add File: folder
++data
+*** Add File: folder/..child.txt
++child
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		assert.deepEqual(await readdir(cwd), []);
+	});
+
+	it("keeps distinct sibling names that share a raw prefix", async () => {
+		const cwd = await workspace();
+		const plan = await planPatch(
+			cwd,
+			`*** Begin Patch
+*** Add File: foo
++one
+*** Add File: foobar/x.txt
++two
+*** End Patch`,
+		);
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(path.join(cwd, "foo"), "utf8"), "one\n");
+		assert.equal(await readFile(path.join(cwd, "foobar/x.txt"), "utf8"), "two\n");
+	});
+
+	it("rejects a case alias of an ancestor directory on an insensitive filesystem", async (t) => {
+		const cwd = await workspace();
+		if (!(await isCaseInsensitive(cwd))) {
+			t.skip("case-sensitive filesystem");
+			return;
+		}
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Add File: Folder
++data
+*** Add File: folder/child.txt
++child
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		assert.deepEqual(await readdir(cwd), ["case-probe.txt"]);
+	});
+
 	it("shares Pi's mutation queue for a not-yet-existing file", async () => {
 		const cwd = await workspace();
 		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: Fresh.txt\n+value\n*** End Patch");
-		const target = plan.changes[0]?.absolutePath;
-		assert.ok(target);
+		// Pi keys the native queue on the submitted lexical path when the target is missing, not the
+		// canonical parent-resolved path. Holding the same spelling must serialize Patchcraft behind it.
+		const target = path.join(cwd, "Fresh.txt");
 		let completedWhileHeld = false;
 		let applying: Promise<void> | undefined;
 		await withFileMutationQueue(target, async () => {
@@ -481,6 +690,172 @@ describe("patch planning and application", () => {
 		await applying;
 		assert.equal(completedWhileHeld, false);
 		assert.equal(await readFile(path.join(cwd, "Fresh.txt"), "utf8"), "value\n");
+	});
+
+	it("shares Pi's mutation queue through a symlinked parent for a missing target", async () => {
+		const cwd = await workspace();
+		await mkdir(path.join(cwd, "real"));
+		await symlink(path.join(cwd, "real"), path.join(cwd, "alias"), process.platform === "win32" ? "junction" : "dir");
+		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: alias/new.txt\n+value\n*** End Patch");
+		// The canonical parent-resolved plan path differs from the submitted spelling; the submitted
+		// lexical path is what Pi's queue and a concurrent writer actually use.
+		const submitted = path.join(cwd, "alias/new.txt");
+		let completedWhileHeld = false;
+		let applying: Promise<void> | undefined;
+		await withFileMutationQueue(submitted, async () => {
+			let done = false;
+			applying = applyPatchPlan(plan).then(() => {
+				done = true;
+			});
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			completedWhileHeld = done;
+		});
+		assert.ok(applying);
+		await applying;
+		assert.equal(completedWhileHeld, false);
+		assert.equal(await readFile(path.join(cwd, "real/new.txt"), "utf8"), "value\n");
+	});
+
+	it("settles concurrent drifted plans that would otherwise invert lock order", async () => {
+		const cwd = await workspace();
+		await mkdir(path.join(cwd, "realA"));
+		await mkdir(path.join(cwd, "realZ"));
+		await symlink(path.join(cwd, "realA"), path.join(cwd, "zlink"), process.platform === "win32" ? "junction" : "dir");
+		await symlink(path.join(cwd, "realZ"), path.join(cwd, "alink"), process.platform === "win32" ? "junction" : "dir");
+		const linkPlan = await planPatch(
+			cwd,
+			`*** Begin Patch
+*** Add File: zlink/one.txt
++one
+*** Add File: alink/two.txt
++two
+*** End Patch`,
+		);
+		const directPlan = await planPatch(
+			cwd,
+			`*** Begin Patch
+*** Add File: realA/one.txt
++one
+*** Add File: realZ/two.txt
++two
+*** End Patch`,
+		);
+		// Drift: the targets now exist, so Pi keys their queues on canonical identities. The link plan's
+		// submitted spellings sort opposite to the direct plan's, so lexical keys would deadlock here.
+		await writeFile(path.join(cwd, "realA/one.txt"), "drift\n");
+		await writeFile(path.join(cwd, "realZ/two.txt"), "drift\n");
+		const settled = await Promise.race([
+			Promise.allSettled([applyPatchPlan(linkPlan), applyPatchPlan(directPlan)]),
+			new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("deadlock")), 5000)),
+		]);
+		for (const result of settled) {
+			assert.equal(result.status, "rejected");
+			if (result.status === "rejected") assert.match(String(result.reason), /changed before apply/);
+		}
+	});
+
+	it("decides case and Unicode-normalization insensitivity independently", async () => {
+		const cwd = await workspace();
+		const originalReaddir = fs.readdir;
+		const originalLstat = fs.lstat;
+		// Simulate a case-sensitive but Unicode-normalization-insensitive filesystem: a case variant is
+		// absent while a normalization variant resolves to the same inode. Hosts only exercise one
+		// default (macOS APFS is both insensitive; Linux is both sensitive), so mock the read-only lookup.
+		fs.readdir = (async () => ["Caf\u00e9.txt"]) as unknown as typeof fs.readdir;
+		fs.lstat = (async (target: string) => {
+			const name = path.basename(target);
+			if (name === "Caf\u00e9.txt" || name === "Cafe\u0301.txt") {
+				return { ino: 1, dev: 1 } as Awaited<ReturnType<typeof stat>>;
+			}
+			throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+		}) as typeof fs.lstat;
+		syncBuiltinESMExports();
+		try {
+			assert.equal(await directoryUsesCaseInsensitiveNames(cwd), false);
+			assert.equal(await directoryUsesNormalizationInsensitiveNames(cwd), true);
+		} finally {
+			fs.readdir = originalReaddir;
+			fs.lstat = originalLstat;
+			syncBuiltinESMExports();
+		}
+	});
+
+	it("rejects a pure Unicode collision but allows a case variant on case-sensitive normalization-insensitive", async () => {
+		const cwd = await workspace();
+		// A normalization variant resolves to the same inode; the ASCII case variants do not.
+		const fixture = "Fixture\u00e9.txt";
+		const restore = installNameLookupMock(
+			[fixture],
+			new Map([
+				[fixture, 1],
+				[fixture.normalize("NFD"), 1],
+			]),
+		);
+		try {
+			await assert.rejects(
+				planPatch(
+					cwd,
+					`*** Begin Patch
+*** Add File: caf\u00e9.txt
++one
+*** Add File: cafe\u0301.txt
++two
+*** End Patch`,
+				),
+				/conflicting operations/,
+			);
+			const plan = await planPatch(
+				cwd,
+				`*** Begin Patch
+*** Add File: a.txt
++lower
+*** Add File: A.txt
++upper
+*** End Patch`,
+			);
+			assert.equal(plan.changes.length, 2);
+		} finally {
+			restore();
+		}
+	});
+
+	it("rejects a case variant but allows a pure Unicode collision on case-insensitive normalization-sensitive", async () => {
+		const cwd = await workspace();
+		// A lowercase case variant resolves to the same inode; the normalization variant does not.
+		const fixture = "Mixed\u00e9.txt";
+		const restore = installNameLookupMock(
+			[fixture],
+			new Map([
+				[fixture, 1],
+				[fixture.toLowerCase(), 1],
+			]),
+		);
+		try {
+			await assert.rejects(
+				planPatch(
+					cwd,
+					`*** Begin Patch
+*** Add File: a.txt
++lower
+*** Add File: A.txt
++upper
+*** End Patch`,
+				),
+				/conflicting operations/,
+			);
+			const plan = await planPatch(
+				cwd,
+				`*** Begin Patch
+*** Add File: caf\u00e9.txt
++composed
+*** Add File: cafe\u0301.txt
++decomposed
+*** End Patch`,
+			);
+			assert.equal(plan.changes.length, 2);
+		} finally {
+			restore();
+		}
 	});
 
 	it("plans a lone add without listing an unreadable directory", { skip: process.platform === "win32" }, async (t) => {
@@ -499,6 +874,40 @@ describe("patch planning and application", () => {
 			await chmod(directory, 0o700);
 		}
 		assert.equal(await readFile(path.join(directory, "only.txt"), "utf8"), "value\n");
+	});
+
+	it("does not list directories for ordinary multi-file adds and moves", async () => {
+		const cwd = await workspace();
+		await writeFile(path.join(cwd, "old.txt"), "old\n");
+		const originalReaddir = fs.readdir;
+		let readdirCalls = 0;
+		fs.readdir = (async () => {
+			readdirCalls++;
+			throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+		}) as unknown as typeof fs.readdir;
+		syncBuiltinESMExports();
+		try {
+			const plan = await planPatch(
+				cwd,
+				`*** Begin Patch
+*** Add File: one.txt
++one
+*** Add File: two.txt
++two
+*** Update File: old.txt
+*** Move to: nested/old.txt
+*** End Patch`,
+			);
+			await applyPatchPlan(plan);
+		} finally {
+			fs.readdir = originalReaddir;
+			syncBuiltinESMExports();
+		}
+		// A probe swallows a lookup error, so only the call count proves no listing happened.
+		assert.equal(readdirCalls, 0);
+		assert.equal(await readFile(path.join(cwd, "one.txt"), "utf8"), "one\n");
+		assert.equal(await readFile(path.join(cwd, "two.txt"), "utf8"), "two\n");
+		assert.equal(await readFile(path.join(cwd, "nested/old.txt"), "utf8"), "old\n");
 	});
 
 	it("re-evaluates case aliases for each plan instead of caching a probe", async () => {
@@ -644,12 +1053,12 @@ describe("patch planning and application", () => {
 			fs.rm = originalRm;
 			syncBuiltinESMExports();
 		}
-		// Apply: created, victim, overwritten. Rollback current first (failing), then reverse order.
+		// Apply: created, victim, overwritten. The failing update never renamed its target, so there is
+		// nothing to restore for it. Roll back the three applied changes in reverse order.
 		assert.deepEqual(events, [
 			"rename:created.txt",
 			"unlink:victim.txt",
 			"rename:overwritten.txt",
-			"rename:failing.txt",
 			"rename:overwritten.txt",
 			"rename:victim.txt",
 			"rm:created.txt",
@@ -661,7 +1070,43 @@ describe("patch planning and application", () => {
 		assert.deepEqual(await temporaryFiles(cwd), []);
 	});
 
-	it("reports rollback failure and preserves a partially written move destination", {
+	it("leaves an untouched target's inode intact when its write rename fails", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "value.txt");
+		const alias = path.join(cwd, "alias.txt");
+		await writeFile(target, "before\n");
+		await link(target, alias);
+		const beforeIno = (await stat(target)).ino;
+		const plan = await planPatch(
+			cwd,
+			"*** Begin Patch\n*** Update File: value.txt\n@@\n-before\n+after\n*** End Patch",
+		);
+		const originalRename = fs.rename;
+		let injected = false;
+		fs.rename = (async (from: string, to: string) => {
+			if (!injected && String(to).endsWith("value.txt")) {
+				injected = true;
+				throw Object.assign(new Error("EIO"), { code: "EIO" });
+			}
+			return originalRename(from, to);
+		}) as typeof fs.rename;
+		syncBuiltinESMExports();
+		try {
+			await assert.rejects(applyPatchPlan(plan), /All applied changes were rolled back/);
+		} finally {
+			fs.rename = originalRename;
+			syncBuiltinESMExports();
+		}
+		assert.ok(injected);
+		// The rename never touched the target, so rollback must not rewrite it and break the hardlink.
+		assert.equal((await stat(target)).ino, beforeIno);
+		assert.equal((await stat(alias)).ino, beforeIno);
+		assert.equal(await readFile(target, "utf8"), "before\n");
+		assert.equal(await readFile(alias, "utf8"), "before\n");
+		assert.deepEqual(await temporaryFiles(cwd), []);
+	});
+
+	it("removes a partially written move destination when the source unlink fails", {
 		skip: process.platform === "win32",
 	}, async (t) => {
 		if (process.getuid?.() === 0) {
@@ -679,15 +1124,17 @@ describe("patch planning and application", () => {
 			cwd,
 			"*** Begin Patch\n*** Update File: source/file.txt\n*** Move to: target/moved.txt\n*** End Patch",
 		);
+		// The read-only source directory makes the unlink fail after the destination was written. The
+		// source still holds the original inode, so rollback only removes the destination copy; it must
+		// not rewrite the source, which the read-only directory would refuse.
 		await chmod(sourceDirectory, 0o500);
 		try {
-			await assert.rejects(applyPatchPlan(plan), /Rollback failed/);
+			await assert.rejects(applyPatchPlan(plan), /All applied changes were rolled back/);
 		} finally {
 			await chmod(sourceDirectory, 0o700);
 		}
 		assert.equal(await readFile(source, "utf8"), "original\n");
-		// Restoring the source failed, so the destination is kept rather than deleted.
-		assert.equal(await readFile(path.join(targetDirectory, "moved.txt"), "utf8"), "original\n");
+		await assert.rejects(stat(path.join(targetDirectory, "moved.txt")));
 	});
 
 	it("keeps a completed move destination when restoring the source fails", async () => {

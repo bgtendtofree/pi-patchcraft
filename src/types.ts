@@ -35,6 +35,13 @@ export interface PlannedFileChange {
 	targetPath: string;
 	absolutePath: string;
 	absoluteTargetPath: string;
+	/**
+	 * Submitted lexical spellings (`path.resolve(cwd, input)` before parent realpath). Pi keys its
+	 * mutation queue on the lexical path for a target that does not exist, so locking these spellings
+	 * shares the native queue instead of a canonical path Pi never uses for a missing file.
+	 */
+	lexicalPath: string;
+	lexicalTargetPath: string;
 	/** Conflict-check and mutation-lock identity. Case-folded on case-insensitive filesystems. */
 	identityPath: string;
 	identityTargetPath: string;
