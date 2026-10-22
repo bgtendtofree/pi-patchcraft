@@ -23,8 +23,10 @@ Patchcraft gives GPT models their familiar Codex patch language. It validates th
 - Structured result for `codemode` scripts (`changes`, `added`, `removed`, `fuzz`)
 - Automatic restoration of Pi `edit` / `write` tools for other models
 - Session-scoped `/patchcraft auto|on|off` override for any model
-- Native Pi rendering, with no custom row or adapter layer
-- With [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools), generic rows gain shared alignment, running Pac-Man animation, and activity grouping
+- Codex-style summary with per-file counts, add/update/delete/move labels, and a multi-file roster
+- Per-file diffs rendered with Pi's native diff renderer, collapsed or expanded
+- Streaming per-file counters while the patch is generated
+- Native Pi components and diff renderer, no custom shell
 
 ## Patch format
 
@@ -116,15 +118,24 @@ One run:
 pi -e git:github.com/bgtendtofree/pi-patchcraft
 ```
 
-For compact, aligned tool rows, running Pac-Man animation, and Transcript Navigator, install Progressive Tools too:
+## Rendering
 
-```bash
-pi install git:github.com/bgtendtofree/pi-progressive-tools
+Patchcraft registers `renderCall` and `renderResult`. The call row shows a Codex-style summary, per-file counters while the patch streams, and a multi-file roster. The call row owns the summary; the result row adds each file's diff through Pi's native `renderDiff`.
+
+```text
+apply_patch  Edited src/app.ts (+3 -1)
 ```
 
-Patchcraft does not register `renderCall`, `renderResult`, or `renderShell`. Pi draws the default row when used alone; Progressive Tools supplies its generic compact row when installed. No per-tool adapter, cross-package contract, or Progressive Tools dependency is needed.
+```text
+apply_patch  Edited 3 files (+5 -2)
+  └ M src/app.ts (+3 -1)
+  └ A src/new.ts (+2 -0)
+  └ D old.txt (+0 -1)
+```
 
-Custom operation titles, right-aligned patch metrics, and formatted per-file diff previews are no longer drawn. Patch execution and returned `content`, `details`, and `structuredContent` are unchanged: added/removed/fuzz counts and per-file `displayDiff` remain in the result, available to scripts and the Navigator's original details.
+A single-file patch shows its diff immediately; a multi-file patch shows the roster and an expand hint until expanded, then all per-file diffs. It does not register `renderShell: "self"`, so Pi's default row keeps pending/success/error backgrounds and output padding.
+
+Patch execution and returned `content`, `details`, and `structuredContent` are unchanged, including per-file `displayDiff` and added/removed/fuzz counts.
 
 ## Development
 

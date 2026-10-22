@@ -7,8 +7,10 @@ import {
 	type AgentToolResult,
 	type AgentToolUpdateCallback,
 	type ExtensionAPI,
+	initTheme,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
 import { Check } from "typebox/value";
 import piPatchcraft from "../src/index.ts";
@@ -18,6 +20,8 @@ interface RegisteredTool {
 	name: string;
 	parameters: TSchema;
 	outputSchema?: { properties?: Record<string, unknown> };
+	renderCall?: unknown;
+	renderResult?: unknown;
 	constrainedSampling?: { type: string; variants: { openai_lark?: string } };
 	annotations?: {
 		readOnlyHint: boolean;
@@ -393,9 +397,55 @@ describe("pi-patchcraft extension", () => {
 		assert.deepEqual(harness.tools, ["read", "bash", "apply_patch"]);
 	});
 
-	it("leaves rendering to Pi or its native renderer resolver", () => {
+	it("registers custom renderers and leaves the shell to Pi", () => {
 		const { tool } = extensionHarness([]);
-		for (const key of ["renderCall", "renderResult", "renderShell"]) assert.equal(Object.hasOwn(tool, key), false, key);
+		assert.equal(typeof tool.renderCall, "function");
+		assert.equal(typeof tool.renderResult, "function");
+		assert.equal(Object.hasOwn(tool, "renderShell"), false);
+	});
+
+	it("renders call and result rows without changing execution data", async () => {
+		initTheme("dark", false);
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-render-"));
+		temporaryDirectories.push(cwd);
+		await writeFile(path.join(cwd, "value.txt"), "before\n");
+		const harness = extensionHarness(["read", "edit", "bash"]);
+		harness.emit("session_start");
+		const { tool } = harness;
+		const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+		const patch = "*** Begin Patch\n*** Update File: value.txt\n@@\n-before\n+after\n*** End Patch";
+		const state = {};
+		const call = (tool.renderCall as (args: unknown, theme: unknown, context: unknown) => unknown)({ patch }, theme, {
+			expanded: false,
+			state,
+			lastComponent: undefined,
+		});
+		assert.ok(call);
+		const callText = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
+		assert.match(callText, /apply_patch/);
+		assert.match(callText, /value\.txt/);
+
+		const result = await tool.execute("render", { patch }, undefined, undefined, { cwd });
+		const rendered = (
+			tool.renderResult as (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown
+		)(result, { expanded: false, isPartial: false }, theme, { isError: false, lastComponent: undefined, state });
+		assert.ok(rendered);
+		const resultText = stripTerminalSequences((rendered as { render(width: number): string[] }).render(80).join("\n"));
+		assert.match(resultText, /before/);
+		assert.match(resultText, /after/);
+		assert.doesNotMatch(resultText, /apply_patch/);
+		assert.equal(result.details.added, 1);
+		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
+
+		const error = (
+			tool.renderResult as (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown
+		)(
+			{ content: [{ type: "text", text: "failed" }], details: undefined },
+			{ expanded: false, isPartial: false },
+			theme,
+			{ isError: true, lastComponent: undefined },
+		);
+		assert.ok(error);
 	});
 
 	it("declares grammar constrained sampling for capable models", () => {

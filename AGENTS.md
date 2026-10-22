@@ -23,6 +23,8 @@ Pi loads the TypeScript files directly. Runtime source and tests use separate Ty
 - `src/parser.ts` — Codex patch envelope and operation parser
 - `src/paths.ts` — Pi-compatible path normalization and resolution
 - `src/match.ts` — pure context matching, chunk application, BOM splitting
+- `src/preview.ts` — tolerant streaming preview scanner
+- `src/render.ts` — Codex-style summary and diff formatting
 - `src/tools.ts` — pure loadout reconciliation and model detection
 - `src/apply.ts` — planning, locking, atomic writes, rollback
 - `src/types.ts` — shared patch, plan, result detail types, plus the codemode result schema
@@ -82,11 +84,14 @@ Content positioning follows Codex: context-less additions append at end of file,
 
 ## Tool Rendering
 
-- Do not register `renderCall`, `renderResult`, or `renderShell`; Pi's native renderer resolver owns presentation.
-- Without [Pi Progressive Tools](https://github.com/bgtendtofree/pi-progressive-tools), Pi uses its default row. With it, the generic compact row supplies shared alignment, Pac-Man animation, and grouping.
-- Do not add adapters, a cross-package protocol, runtime dependencies, or imports from Progressive Tools.
-- Preserve normal progress updates, errors, and returned `content`/`details`/`structuredContent`, including `displayDiff`, added/removed counts, and fuzz. Do not parse the patch again for presentation.
-- Regression tests must assert custom renderer fields are absent and execution/result data remain intact.
+- Register `renderCall` and `renderResult` for `apply_patch`; keep formatting and preview scanning in focused modules.
+- Do not register `renderShell: "self"`; Pi's default shell owns pending/success/error backgrounds and output padding.
+- Reuse Pi's `renderDiff`; do not implement a custom diff parser or syntax highlighter.
+- `src/preview.ts` may scan partial patch arguments for display only. It must be tolerant, bounded, cached, and never feed execution.
+- The call row owns the summary; the result renderer adds diffs or the expand hint and must not repeat the summary.
+- Do not repeat the success `content` text; render error `content` as-is.
+- Preserve normal progress updates, errors, and returned `content`/`details`/`structuredContent`, including `displayDiff`, added/removed counts, and fuzz.
+- Tests must assert summary labels/counts, roster and diff rendering, streaming bounds, error output, and unchanged execution/result data.
 
 ## Model Tool Policy
 
@@ -125,7 +130,7 @@ pi -e ./src/index.ts
 - Path changes: test relative, absolute, home-relative, parent, and symlinked paths.
 - Apply changes: test preflight, no-op rejection, fuzzy matching, moves, source drift, and rollback behavior.
 - Tool wiring changes: test registration, argument validation, model switching, and error signaling.
-- Presentation changes: assert native-renderer fallback, progress updates, and unmodified structured results; do not reintroduce self-rendering or adapter tests.
+- Presentation changes: assert renderer output, streaming bounds, progress updates, and unmodified structured results.
 - Keep coverage thresholds passing; do not lower them to accommodate untested behavior.
 
 ## Repository Hygiene

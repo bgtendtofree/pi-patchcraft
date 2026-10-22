@@ -1,7 +1,17 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { applyPatchPlan, planPatch } from "./apply.ts";
 import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
+import { scanPatchPreview } from "./preview.ts";
+import {
+	formatPatchCall,
+	formatPatchError,
+	formatPatchProgress,
+	formatPatchResult,
+	formatPatchSummary,
+	type RenderTheme,
+} from "./render.ts";
 import { isPatchcraftModel, reconcileActiveTools } from "./tools.ts";
 import { type PatchPlan, type PatchResultDetails, patchResultSchema } from "./types.ts";
 
@@ -18,6 +28,13 @@ type PatchcraftMode = "auto" | "off" | "on";
 
 interface PatchcraftModeState {
 	mode: PatchcraftMode;
+}
+
+interface PatchcraftRenderState {
+	callKey?: string;
+	callText?: string;
+	callTheme?: RenderTheme;
+	callComponent?: Text;
 }
 
 function resultDetails(plan: PatchPlan): PatchResultDetails {
@@ -125,6 +142,44 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		// Codemode scripts receive this shape instead of the text content.
 		outputSchema: patchResultSchema,
 		executionMode: "sequential",
+		renderCall(args, theme, context) {
+			const state = context.state as PatchcraftRenderState;
+			const patch = typeof args?.patch === "string" ? args.patch : "";
+			const key = `${context.expanded}:${patch.length}:${patch.charCodeAt(patch.length - 1)}`;
+			if (state.callKey !== key || state.callTheme !== theme) {
+				state.callKey = key;
+				state.callText = formatPatchCall(scanPatchPreview(patch), theme, { expanded: context.expanded });
+				state.callTheme = theme;
+			}
+			const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+			state.callComponent = component;
+			component.setText(state.callText ?? "");
+			return component;
+		},
+		renderResult(result, options, theme, context) {
+			const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+			if (context.isError) {
+				component.setText(formatPatchError(result.content, theme) || theme.fg("error", "apply_patch failed"));
+				return component;
+			}
+			if (options.isPartial) {
+				component.setText(formatPatchProgress(result.content, theme) || theme.fg("warning", "Applying patch…"));
+				return component;
+			}
+			const details = result.details as PatchResultDetails | undefined;
+			if (details) {
+				// Replace the streaming estimate with the exact counts from the executed plan.
+				const state = context.state as PatchcraftRenderState;
+				state.callText = formatPatchSummary(details, theme, { expanded: options.expanded });
+				state.callComponent?.setText(state.callText);
+			}
+			component.setText(
+				details
+					? formatPatchResult(details, theme, { expanded: options.expanded })
+					: formatPatchProgress(result.content, theme),
+			);
+			return component;
+		},
 		// Capable models write the patch as raw text instead of a JSON-escaped string. Pi falls back
 		// to the JSON-schema function tool on providers without grammar constrained sampling.
 		constrainedSampling: { type: "grammar", variants: { openai_lark: APPLY_PATCH_LARK_GRAMMAR } },
