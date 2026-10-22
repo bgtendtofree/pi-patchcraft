@@ -41,24 +41,84 @@ const MAX_PATCH_BYTES = 1024 * 1024;
 const MAX_SOURCE_BYTES = 64 * 1024 * 1024;
 const MAX_LINK_DEPTH = 40;
 
+function splitPath(value: string): string[] {
+	const root = path.parse(value).root;
+	const rest = value.slice(root.length);
+	const separator = process.platform === "win32" ? /[\\/]/ : path.sep;
+	const parts = rest.split(separator).filter((part) => part.length > 0);
+	// A trailing separator requires a directory. `rest` being empty means the value is the root,
+	// which lstat already reports as a directory, so no explicit marker is needed there.
+	const trailingSeparator =
+		rest.length > 0 && (process.platform === "win32" ? /[\\/]$/.test(rest) : rest.endsWith(path.sep));
+	if (trailingSeparator) parts.push(".");
+	return parts;
+}
+
+function notDirectoryError(target: string): Error {
+	return Object.assign(new Error(`Cannot traverse non-directory path component (ENOTDIR): ${target}`), {
+		code: "ENOTDIR",
+	});
+}
+
+/** A missing component cannot be followed by `..`: path.join would collapse it and write elsewhere. */
+function appendMissingPath(missing: string, pending: readonly string[]): string {
+	if (pending.includes("..")) {
+		throw new Error(
+			`Cannot resolve a patch path with ".." after a missing component: ${path.join(missing, ...pending)}`,
+		);
+	}
+	if (pending.at(-1) === ".") {
+		throw new Error(`Cannot write a file for a patch path that requires a directory: ${missing}`);
+	}
+	return path.join(missing, ...pending);
+}
+
+/**
+ * Walk the path component by component so a `..` inside a symlink target is resolved against the
+ * physical directory the previous components reached, not lexically before the link is followed.
+ * Returns the canonical path, including a missing suffix under the deepest existing parent.
+ */
 async function resolveLinkChain(absolutePath: string): Promise<LinkResolution> {
-	let current = absolutePath;
+	const root = path.parse(absolutePath).root;
+	let current = root;
+	const pending = splitPath(absolutePath);
 	let followed = false;
-	for (let depth = 0; depth < MAX_LINK_DEPTH; depth++) {
+	let links = 0;
+
+	while (pending.length > 0) {
+		const part = pending.shift();
+		if (part === undefined) break;
+		if (part === ".") continue;
+		if (part === "..") {
+			current = path.dirname(current);
+			continue;
+		}
+		const candidate = path.join(current, part);
 		let stats: Awaited<ReturnType<typeof lstat>>;
 		try {
-			stats = await lstat(current);
+			stats = await lstat(candidate);
 		} catch (error) {
 			if (isErrorCode(error, "ENOENT") || isErrorCode(error, "ENOTDIR")) {
-				return { path: current, stats: undefined, followed };
+				return { path: appendMissingPath(candidate, pending), stats: undefined, followed };
 			}
 			throw error;
 		}
-		if (!stats.isSymbolicLink()) return { path: current, stats, followed };
+		if (!stats.isSymbolicLink()) {
+			if (pending.length > 0 && !stats.isDirectory()) throw notDirectoryError(candidate);
+			current = candidate;
+			continue;
+		}
 		followed = true;
-		current = path.resolve(path.dirname(current), await readlink(current));
+		links++;
+		if (links > MAX_LINK_DEPTH) throw new Error(`Too many symbolic links: ${absolutePath}`);
+		const target = await readlink(candidate);
+		if (path.isAbsolute(target)) current = path.parse(target).root;
+		pending.unshift(...splitPath(target));
 	}
-	throw new Error(`Too many symbolic links: ${absolutePath}`);
+
+	// Every missing component returned above; the remaining path is an existing root, directory, or
+	// symlink target. A concurrent disappearance should surface instead of becoming a dangling Add.
+	return { path: current, stats: await lstat(current), followed };
 }
 
 async function pathExists(absolutePath: string): Promise<boolean> {
@@ -179,6 +239,20 @@ async function lookupSensitivity(
 }
 
 /**
+ * Case-fold a name for filesystem comparison. The upper/lower round trip covers APFS aliases such
+ * as sigma/final sigma (σ/ς), long s (S/ſ), micro sign (µ/Μ), and sharp s (ß/SS), but it maps
+ * capital sharp S (ẞ) to ß instead of ss and over-folds dotless i to i. Apply those exceptions.
+ */
+function foldCase(value: string): string {
+	return value
+		.replaceAll("\u0131", "\0")
+		.replaceAll("\u1E9E", "ss")
+		.toUpperCase()
+		.toLowerCase()
+		.replaceAll("\0", "\u0131");
+}
+
+/**
  * Fold a name the way the filesystem equates spellings. An axis is folded unless the probe proved
  * the filesystem is sensitive for it. An unknown axis stays folded, so a possible collision fails
  * closed instead of borrowing the other axis' answer (case-sensitive APFS is still normalization-
@@ -186,14 +260,14 @@ async function lookupSensitivity(
  */
 function foldName(value: string, sensitivity: ResolvedSensitivity): string {
 	let folded = value;
-	if (sensitivity.caseInsensitive !== false) folded = folded.toLowerCase();
+	if (sensitivity.caseInsensitive !== false) folded = foldCase(folded);
 	if (sensitivity.normalizationInsensitive !== false) folded = folded.normalize("NFC");
 	return folded;
 }
 
 /** Maximally folded key: equal only when the two paths could be one file on either axis. */
 function foldAll(value: string): string {
-	return value.toLowerCase().normalize("NFC");
+	return foldCase(value.normalize("NFC")).normalize("NFC");
 }
 
 /**

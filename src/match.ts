@@ -31,6 +31,26 @@ const FUZZ_NORMALIZED = 10000;
 
 const BOM = "\uFEFF";
 
+/**
+ * Bound worst-case line comparisons across all hunks. A long non-matching sequence would otherwise
+ * scan every remaining window at every fuzz tier and freeze Pi's single-threaded tool loop; an
+ * explicit budget fails fast instead of silently skipping a tier or broadening the search.
+ */
+const MAX_MATCH_COMPARISONS = 5_000_000;
+
+interface MatchBudget {
+	remaining: number;
+}
+
+function spendMatchWork(budget: MatchBudget, filePath: string): void {
+	if (budget.remaining <= 0) {
+		throw new Error(
+			`Patch matching exceeded its comparison budget for ${filePath}; re-read the file and use a smaller update hunk.`,
+		);
+	}
+	budget.remaining--;
+}
+
 /** Split a leading UTF-8 BOM from file content, mirroring Pi's edit tool. */
 export function splitBom(text: string): { bom: string; text: string } {
 	return text.startsWith(BOM) ? { bom: BOM, text: text.slice(1) } : { bom: "", text };
@@ -85,6 +105,8 @@ function findSequence(
 	pattern: readonly string[],
 	start: number,
 	eof: boolean,
+	filePath: string,
+	budget: MatchBudget,
 ): Match | undefined {
 	if (pattern.length === 0) return { index: start, fuzz: FUZZ_EXACT };
 	if (pattern.length > lines.length) return undefined;
@@ -98,11 +120,19 @@ function findSequence(
 	];
 
 	for (const variant of variants) {
-		const expected = pattern.map(variant.prepare);
+		const expected: string[] = [];
+		for (const value of pattern) {
+			spendMatchWork(budget, filePath);
+			expected.push(variant.prepare(value));
+		}
 		for (let index = first; index <= last; index++) {
-			if (expected.every((value, offset) => variant.prepare(lines[index + offset] ?? "") === value)) {
-				return { index, fuzz: variant.fuzz };
+			let offset = 0;
+			while (offset < expected.length) {
+				spendMatchWork(budget, filePath);
+				if (variant.prepare(lines[index + offset] ?? "") !== expected[offset]) break;
+				offset++;
 			}
+			if (offset === expected.length) return { index, fuzz: variant.fuzz };
 		}
 	}
 	return undefined;
@@ -152,12 +182,13 @@ function computeReplacements(
 	chunks: readonly PatchChunk[],
 ): { replacements: Replacement[]; fuzz: number } {
 	const replacements: Replacement[] = [];
+	const budget: MatchBudget = { remaining: MAX_MATCH_COMPARISONS };
 	let lineIndex = 0;
 	let fuzz = 0;
 
 	for (const chunk of chunks) {
 		for (const context of chunk.contexts) {
-			const contextMatch = findSequence(originalLines, [context], lineIndex, false);
+			const contextMatch = findSequence(originalLines, [context], lineIndex, false, filePath, budget);
 			if (!contextMatch) {
 				throw new Error(
 					`Failed to find context '${context}' in ${filePath}.\n${describeClosestMatch(originalLines, [context], lineIndex)}`,
@@ -175,12 +206,12 @@ function computeReplacements(
 
 		let pattern: readonly string[] = chunk.oldLines;
 		let newLines: readonly string[] = chunk.newLines;
-		let match = findSequence(originalLines, pattern, lineIndex, chunk.endOfFile);
+		let match = findSequence(originalLines, pattern, lineIndex, chunk.endOfFile, filePath, budget);
 		if (!match && pattern.at(-1) === "") {
 			// The trailing empty string stands for the final newline, which the line list does not hold.
 			pattern = pattern.slice(0, -1);
 			if (newLines.at(-1) === "") newLines = newLines.slice(0, -1);
-			match = findSequence(originalLines, pattern, lineIndex, chunk.endOfFile);
+			match = findSequence(originalLines, pattern, lineIndex, chunk.endOfFile, filePath, budget);
 		}
 		if (!match) {
 			throw new Error(

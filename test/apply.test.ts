@@ -287,6 +287,117 @@ describe("patch planning and application", () => {
 		assert.equal(await readlink(linkPath), "missing.txt");
 	});
 
+	it("resolves .. in a symlink target against the real directory chain", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const cwd = await workspace();
+		await mkdir(path.join(cwd, "elsewhere/inner"), { recursive: true });
+		await symlink(
+			path.join(cwd, "elsewhere/inner"),
+			path.join(cwd, "jump"),
+			process.platform === "win32" ? "junction" : "dir",
+		);
+		await writeFile(path.join(cwd, "target.txt"), "old\n");
+		await writeFile(path.join(cwd, "elsewhere/target.txt"), "old\n");
+		await symlink("jump/../target.txt", path.join(cwd, "link.txt"));
+		const plan = await planPatch(cwd, "*** Begin Patch\n*** Update File: link.txt\n@@\n-old\n+new\n*** End Patch");
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(path.join(cwd, "target.txt"), "utf8"), "old\n");
+		assert.equal(await readFile(path.join(cwd, "elsewhere/target.txt"), "utf8"), "new\n");
+		assert.equal(await readFile(path.join(cwd, "link.txt"), "utf8"), "new\n");
+		assert.equal((await lstat(path.join(cwd, "link.txt"))).isSymbolicLink(), true);
+	});
+
+	it("rejects a symlink target that traverses a non-directory", { skip: process.platform === "win32" }, async () => {
+		const cwd = await workspace();
+		await writeFile(path.join(cwd, "regular-file"), "file\n");
+		await writeFile(path.join(cwd, "target.txt"), "old\n");
+		await symlink("regular-file/../target.txt", path.join(cwd, "link.txt"));
+		await assert.rejects(
+			planPatch(cwd, "*** Begin Patch\n*** Add File: link.txt\n+created\n*** End Patch"),
+			/ENOTDIR|not a directory/,
+		);
+		assert.equal(await readFile(path.join(cwd, "target.txt"), "utf8"), "old\n");
+	});
+
+	it("rejects a regular-file symlink target ending in a slash", { skip: process.platform === "win32" }, async () => {
+		const cwd = await workspace();
+		await writeFile(path.join(cwd, "target.txt"), "old\n");
+		await symlink("target.txt/", path.join(cwd, "link.txt"));
+		await assert.rejects(
+			planPatch(cwd, "*** Begin Patch\n*** Update File: link.txt\n@@\n-old\n+new\n*** End Patch"),
+			/ENOTDIR|not a directory/,
+		);
+		assert.equal(await readFile(path.join(cwd, "target.txt"), "utf8"), "old\n");
+	});
+
+	it("rejects a dangling symlink target that requires a directory", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const cwd = await workspace();
+		await symlink("missing/", path.join(cwd, "link.txt"));
+		await assert.rejects(
+			planPatch(cwd, "*** Begin Patch\n*** Add File: link.txt\n+created\n*** End Patch"),
+			/requires a directory/,
+		);
+		await assert.rejects(stat(path.join(cwd, "missing")));
+	});
+
+	it("rejects a dangling symlink target with .. after a missing component", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const cwd = await workspace();
+		await symlink("missing/../new.txt", path.join(cwd, "link.txt"));
+		await assert.rejects(
+			planPatch(cwd, "*** Begin Patch\n*** Add File: link.txt\n+created\n*** End Patch"),
+			/\.\." after a missing component/,
+		);
+		await assert.rejects(readFile(path.join(cwd, "new.txt")));
+		await assert.rejects(stat(path.join(cwd, "missing")));
+	});
+
+	it("rejects conflicts through a dangling link target under a symlinked parent", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const cwd = await workspace();
+		await mkdir(path.join(cwd, "real"));
+		await symlink(path.join(cwd, "real"), path.join(cwd, "alias"), process.platform === "win32" ? "junction" : "dir");
+		await writeFile(path.join(cwd, "source.txt"), "precious\n");
+		await symlink("alias/new.txt", path.join(cwd, "link.txt"));
+
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Update File: source.txt
+*** Move to: real/new.txt
+*** Add File: link.txt
++second
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		await assert.rejects(
+			planPatch(
+				cwd,
+				`*** Begin Patch
+*** Add File: link.txt
++first
+*** Add File: real/new.txt
++second
+*** End Patch`,
+			),
+			/conflicting operations/,
+		);
+		assert.equal(await readFile(path.join(cwd, "source.txt"), "utf8"), "precious\n");
+		await assert.rejects(readFile(path.join(cwd, "real/new.txt")));
+
+		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: link.txt\n+created\n*** End Patch");
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(path.join(cwd, "real/new.txt"), "utf8"), "created\n");
+		assert.equal((await lstat(path.join(cwd, "link.txt"))).isSymbolicLink(), true);
+	});
+
 	it("refuses Delete and Move through a file symlink", { skip: process.platform === "win32" }, async () => {
 		const cwd = await workspace();
 		const target = path.join(cwd, "real.txt");
@@ -884,6 +995,90 @@ describe("patch planning and application", () => {
 			fs.lstat = originalLstat;
 			syncBuiltinESMExports();
 		}
+	});
+
+	it("folds Unicode case aliases beyond simple lowercasing", async () => {
+		const cwd = await workspace();
+		// A fixture whose lowercase variant resolves to the same inode proves case-insensitivity to
+		// the read-only probe; the aliases under test need not exist for the collision preflight.
+		const fixture = "Stra\u00dfe.txt";
+		const restore = installNameLookupMock(
+			[fixture],
+			new Map([
+				[fixture, 1],
+				[fixture.toLowerCase(), 1],
+			]),
+		);
+		try {
+			const pairs = [
+				["\u03c3.txt", "\u03c2.txt"],
+				["S.txt", "\u017f.txt"],
+				["\u00b5.txt", "\u039c.txt"],
+				["\u00df.txt", "SS.txt"],
+				["\u1e9e.txt", "ss.txt"],
+				["\u1e9e.txt", "\u00df.txt"],
+			];
+			for (const [left, right] of pairs) {
+				await assert.rejects(
+					planPatch(
+						cwd,
+						`*** Begin Patch
+*** Add File: ${left}
++one
+*** Add File: ${right}
++two
+*** End Patch`,
+					),
+					/conflicting operations/,
+				);
+			}
+		} finally {
+			restore();
+		}
+		assert.deepEqual(await readdir(cwd), []);
+	});
+
+	it("rejects Unicode case aliases of move destinations on a case-insensitive host", async (t) => {
+		const cwd = await workspace();
+		const candidates = [
+			["\u00df.txt", "SS.txt"],
+			["\u1e9e.txt", "ss.txt"],
+			["\u1e9e.txt", "\u00df.txt"],
+		];
+		const aliases: string[][] = [];
+		for (const [left = "", right = ""] of candidates) {
+			await writeFile(path.join(cwd, left), "probe\n");
+			try {
+				await stat(path.join(cwd, right));
+				aliases.push([left, right]);
+			} catch {
+				// The host keeps this pair distinct; skip only that pair.
+			}
+			await rm(path.join(cwd, left));
+		}
+		if (aliases.length === 0) {
+			t.skip("host does not fold these Unicode pairs");
+			return;
+		}
+
+		await writeFile(path.join(cwd, "one.txt"), "FIRST\n");
+		await writeFile(path.join(cwd, "two.txt"), "SECOND\n");
+		for (const [left = "", right = ""] of aliases) {
+			await assert.rejects(
+				planPatch(
+					cwd,
+					`*** Begin Patch
+*** Update File: one.txt
+*** Move to: ${left}
+*** Update File: two.txt
+*** Move to: ${right}
+*** End Patch`,
+				),
+				/conflicting operations/,
+			);
+		}
+		assert.equal(await readFile(path.join(cwd, "one.txt"), "utf8"), "FIRST\n");
+		assert.equal(await readFile(path.join(cwd, "two.txt"), "utf8"), "SECOND\n");
 	});
 
 	it("rejects a pure Unicode collision but allows a case variant on case-sensitive normalization-insensitive", async () => {

@@ -85,6 +85,15 @@ describe("applyChunks", () => {
 		);
 	});
 
+	it("fails with a comparison budget instead of scanning an unbounded sequence", () => {
+		const content = "x\n".repeat(48_000);
+		const oldLines = Array(4_799).fill("x").concat("missing");
+		assert.throws(
+			() => applyChunks(content, "large.txt", [chunk({ oldLines, newLines: ["changed"] })]),
+			/comparison budget for large\.txt; re-read the file and use a smaller update hunk/,
+		);
+	});
+
 	it("says when no line in the remaining file matches", () => {
 		assert.throws(
 			() => applyChunks("a\n", "value.txt", [chunk({ oldLines: ["missing"], newLines: ["x"] })]),
