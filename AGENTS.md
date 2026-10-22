@@ -89,6 +89,7 @@ Content positioning follows Codex: context-less additions append at end of file,
 - Reuse Pi's `renderDiff`; do not implement a custom diff parser, syntax highlighter, or Codex-style tinted diff backgrounds. Pi's theme colors and terminal capability handling are the compatibility baseline.
 - `src/preview.ts` may scan partial patch arguments for display only, including a bounded glimpse after arguments complete. It must be tolerant, bounded, cached, and never feed execution.
 - The call row owns the summary; the result renderer adds diffs or the expand hint and must not repeat the summary.
+- Show a single-file result diff in full like Pi's `edit`; bound only multi-file rosters and diffs.
 - Do not repeat the success `content` text; render error `content` as-is.
 - Preserve normal progress updates, errors, and returned `content`/`details`/`structuredContent`, including `displayDiff`, added/removed counts, and fuzz.
 - Tests must assert summary labels/counts, roster and diff rendering, streaming bounds, error output, and unchanged execution/result data.

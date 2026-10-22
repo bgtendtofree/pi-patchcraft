@@ -17,7 +17,6 @@ interface TextBlock {
 
 const MAX_ROSTER_COLLAPSED = 10;
 const MAX_ROSTER_EXPANDED = 500;
-const MAX_DIFF_COLLAPSED = 200;
 const MAX_DIFF_EXPANDED = 2000;
 const MAX_DIFF_PER_FILE = 500;
 const MAX_PATH_CHARS = 80;
@@ -237,12 +236,10 @@ export function formatPatchSummary(
 	});
 }
 
-function formatSingleResult(change: PatchResultChange, theme: RenderTheme, expanded: boolean): string {
-	const diff = renderChangeDiff(change, expanded ? MAX_DIFF_EXPANDED : MAX_DIFF_COLLAPSED);
-	if (diff.lines.length === 0) return "";
-	const lines = [...diff.lines];
-	if (diff.truncated) lines.push(truncationHint(theme, expanded));
-	return lines.join("\n");
+function formatSingleResult(change: PatchResultChange): string {
+	// Match Pi's edit tool: a single-file diff is shown in full, without a collapsed cap.
+	const diff = renderChangeDiff(change, Number.POSITIVE_INFINITY);
+	return diff.lines.join("\n");
 }
 
 function formatMultiResult(details: PatchResultDetails, theme: RenderTheme, expanded: boolean): string {
@@ -277,8 +274,7 @@ export function formatPatchResult(
 	options: { expanded: boolean },
 ): string {
 	if (details.changes.length === 0) return "";
-	if (details.changes.length === 1)
-		return formatSingleResult(details.changes[0] as PatchResultChange, theme, options.expanded);
+	if (details.changes.length === 1) return formatSingleResult(details.changes[0] as PatchResultChange);
 	return formatMultiResult(details, theme, options.expanded);
 }
 

@@ -112,6 +112,27 @@ describe("formatPatchResult", () => {
 		assert.doesNotMatch(text, /apply_patch/);
 	});
 
+	it("shows a single-file diff in full like Pi's edit tool", () => {
+		const diff = Array.from({ length: 250 }, (_, index) => `+${index + 1} line${index + 1}`).join("\n");
+		const text = formatPatchResult(
+			details([
+				{
+					operation: "add",
+					path: "big.txt",
+					targetPath: "big.txt",
+					displayDiff: diff,
+					added: 250,
+					removed: 0,
+					fuzz: 0,
+				},
+			]),
+			theme,
+			{ expanded: false },
+		);
+		assert.match(text, /line250/);
+		assert.doesNotMatch(text, /more lines/);
+	});
+
 	it("keeps multi-file diffs collapsed until expanded", () => {
 		const result = details([
 			{

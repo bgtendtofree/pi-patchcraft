@@ -133,7 +133,7 @@ apply_patch  Edited 3 files (+5 -2)
   └ D old.txt (+0 -1)
 ```
 
-A single-file patch shows its diff immediately; a multi-file patch shows the roster and an expand hint until expanded, then all per-file diffs. It does not register `renderShell: "self"`, so Pi's default row keeps pending/success/error backgrounds and output padding.
+A single-file patch shows its full diff immediately, matching Pi's `edit`; a multi-file patch shows the roster and an expand hint until expanded, then bounded per-file diffs. It does not register `renderShell: "self"`, so Pi's default row keeps pending/success/error backgrounds and output padding.
 
 Patch execution and returned `content`, `details`, and `structuredContent` are unchanged, including per-file `displayDiff` and added/removed/fuzz counts.
 
