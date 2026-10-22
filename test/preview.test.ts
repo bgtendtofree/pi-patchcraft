@@ -16,8 +16,28 @@ describe("scanPatchPreview", () => {
 *** Update File: b.txt
 +again`);
 		assert.deepEqual(preview.files, [
-			{ operation: "add", path: "a.txt", added: 2, removed: 0 },
-			{ operation: "move", path: "b.txt", targetPath: "c.txt", added: 2, removed: 1 },
+			{
+				operation: "add",
+				path: "a.txt",
+				added: 2,
+				removed: 0,
+				lines: [
+					{ type: "add", text: "one" },
+					{ type: "add", text: "two" },
+				],
+			},
+			{
+				operation: "move",
+				path: "b.txt",
+				targetPath: "c.txt",
+				added: 2,
+				removed: 1,
+				lines: [
+					{ type: "delete", text: "old" },
+					{ type: "add", text: "new" },
+					{ type: "add", text: "again" },
+				],
+			},
 		]);
 		assert.equal(preview.added, 4);
 		assert.equal(preview.removed, 1);
@@ -33,7 +53,7 @@ garbage
 *** End Patch
 *** Add File: after.txt
 +ignored`);
-		assert.deepEqual(preview.files, [{ operation: "delete", path: "gone.txt", added: 0, removed: 0 }]);
+		assert.deepEqual(preview.files, [{ operation: "delete", path: "gone.txt", added: 0, removed: 0, lines: [] }]);
 	});
 
 	it("caps the roster and marks the preview truncated", () => {

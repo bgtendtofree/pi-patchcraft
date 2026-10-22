@@ -7,12 +7,20 @@
 
 export type PreviewOperation = "add" | "update" | "delete" | "move";
 
+export type PreviewLineType = "add" | "delete" | "context";
+
+export interface PreviewLine {
+	type: PreviewLineType;
+	text: string;
+}
+
 export interface PreviewFile {
 	operation: PreviewOperation;
 	path: string;
 	targetPath?: string;
 	added: number;
 	removed: number;
+	lines: PreviewLine[];
 }
 
 export interface PatchPreview {
@@ -24,6 +32,9 @@ export interface PatchPreview {
 
 const MAX_PREVIEW_BYTES = 256 * 1024;
 const MAX_PREVIEW_FILES = 500;
+const MAX_PREVIEW_LINES = 2000;
+const MAX_PREVIEW_LINES_PER_FILE = 500;
+const MAX_PREVIEW_LINE_CHARS = 200;
 
 const BEGIN = "*** Begin Patch";
 const END = "*** End Patch";
@@ -43,6 +54,19 @@ export function scanPatchPreview(input: string): PatchPreview {
 	let truncated = input.length > capped.length;
 	let added = 0;
 	let removed = 0;
+	let storedLines = 0;
+
+	const pushLine = (file: PreviewFile, type: PreviewLineType, text: string): void => {
+		if (storedLines >= MAX_PREVIEW_LINES || file.lines.length >= MAX_PREVIEW_LINES_PER_FILE) {
+			truncated = true;
+			return;
+		}
+		file.lines.push({
+			type,
+			text: text.length > MAX_PREVIEW_LINE_CHARS ? `${text.slice(0, MAX_PREVIEW_LINE_CHARS - 1)}…` : text,
+		});
+		storedLines++;
+	};
 
 	for (const raw of lines) {
 		const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
@@ -79,18 +103,30 @@ export function scanPatchPreview(input: string): PatchPreview {
 				truncated = true;
 				break;
 			}
-			current = { operation, path, added: 0, removed: 0 };
+			current = { operation, path, added: 0, removed: 0, lines: [] };
 			byPath.set(path, current);
 			files.push(current);
 			continue;
 		}
-		if (!current || current.operation === "delete" || line.startsWith("@@")) continue;
+		if (!current || current.operation === "delete" || line.startsWith("@@") || line === "") continue;
+		if (current.operation === "add") {
+			if (line.startsWith("+")) {
+				current.added++;
+				added++;
+				pushLine(current, "add", line.slice(1));
+			}
+			continue;
+		}
 		if (line.startsWith("+")) {
 			current.added++;
 			added++;
+			pushLine(current, "add", line.slice(1));
 		} else if (line.startsWith("-")) {
 			current.removed++;
 			removed++;
+			pushLine(current, "delete", line.slice(1));
+		} else if (line.startsWith(" ")) {
+			pushLine(current, "context", line.slice(1));
 		}
 	}
 

@@ -120,7 +120,7 @@ pi -e git:github.com/bgtendtofree/pi-patchcraft
 
 ## Rendering
 
-Patchcraft registers `renderCall` and `renderResult`. The call row shows a Codex-style summary, per-file counters while the patch streams, and a multi-file roster. The call row owns the summary; the result row adds each file's diff through Pi's native `renderDiff`.
+Patchcraft registers `renderCall` and `renderResult`. The call row shows a Codex-style summary, per-file counters while the patch streams, and a multi-file roster. Once the arguments are complete, it adds a bounded glimpse of the focused file. The call row owns the summary; the result row replaces the glimpse with each file's real diff through Pi's native `renderDiff`.
 
 ```text
 apply_patch  Edited src/app.ts (+3 -1)

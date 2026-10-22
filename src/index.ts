@@ -145,10 +145,13 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		renderCall(args, theme, context) {
 			const state = context.state as PatchcraftRenderState;
 			const patch = typeof args?.patch === "string" ? args.patch : "";
-			const key = `${context.expanded}:${patch.length}:${patch.charCodeAt(patch.length - 1)}`;
+			const key = `${context.expanded}:${context.argsComplete}:${patch.length}:${patch.charCodeAt(patch.length - 1)}`;
 			if (state.callKey !== key || state.callTheme !== theme) {
 				state.callKey = key;
-				state.callText = formatPatchCall(scanPatchPreview(patch), theme, { expanded: context.expanded });
+				state.callText = formatPatchCall(scanPatchPreview(patch), theme, {
+					expanded: context.expanded,
+					argsComplete: context.argsComplete,
+				});
 				state.callTheme = theme;
 			}
 			const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);

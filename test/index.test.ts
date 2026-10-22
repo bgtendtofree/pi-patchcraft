@@ -417,6 +417,7 @@ describe("pi-patchcraft extension", () => {
 		const state = {};
 		const call = (tool.renderCall as (args: unknown, theme: unknown, context: unknown) => unknown)({ patch }, theme, {
 			expanded: false,
+			argsComplete: true,
 			state,
 			lastComponent: undefined,
 		});
@@ -424,6 +425,8 @@ describe("pi-patchcraft extension", () => {
 		const callText = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
 		assert.match(callText, /apply_patch/);
 		assert.match(callText, /value\.txt/);
+		assert.match(callText, /-before/);
+		assert.match(callText, /\+after/);
 
 		const result = await tool.execute("render", { patch }, undefined, undefined, { cwd });
 		const rendered = (
@@ -434,6 +437,8 @@ describe("pi-patchcraft extension", () => {
 		assert.match(resultText, /before/);
 		assert.match(resultText, /after/);
 		assert.doesNotMatch(resultText, /apply_patch/);
+		const settledCallText = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
+		assert.doesNotMatch(settledCallText, /before/);
 		assert.equal(result.details.added, 1);
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
 

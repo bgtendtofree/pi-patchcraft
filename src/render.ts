@@ -21,6 +21,9 @@ const MAX_DIFF_COLLAPSED = 200;
 const MAX_DIFF_EXPANDED = 2000;
 const MAX_DIFF_PER_FILE = 500;
 const MAX_PATH_CHARS = 80;
+const MAX_GLIMPSE_COLLAPSED = 10;
+const MAX_GLIMPSE_EXPANDED = 500;
+const MAX_GLIMPSE_LINE_CHARS = 200;
 
 function sanitize(text: string): string {
 	return stripTerminalSequences(text)
@@ -99,25 +102,79 @@ function hiddenFiles(count: number, theme: RenderTheme): string {
 	return `  ${theme.fg("muted", `… ${count} more files`)}`;
 }
 
-function formatCallPreview(preview: PatchPreview, theme: RenderTheme, expanded: boolean): string {
+function focusFile(files: readonly PreviewFile[]): PreviewFile | undefined {
+	for (let index = files.length - 1; index >= 0; index--) {
+		const file = files[index];
+		if (file && file.operation !== "delete" && file.lines.length > 0) return file;
+	}
+	return files.at(-1);
+}
+
+function sanitizeLine(text: string): string {
+	const clean = sanitize(text).replace(/\n/g, " ");
+	return clean.length > MAX_GLIMPSE_LINE_CHARS ? `${clean.slice(0, MAX_GLIMPSE_LINE_CHARS - 1)}…` : clean;
+}
+
+function appendGlimpse(
+	lines: string[],
+	file: PreviewFile,
+	theme: RenderTheme,
+	expanded: boolean,
+	indent: string,
+): void {
+	if (file.operation === "delete" || file.lines.length === 0) return;
+	const max = expanded ? MAX_GLIMPSE_EXPANDED : MAX_GLIMPSE_COLLAPSED;
+	const visible = file.lines.slice(0, max);
+	for (const line of visible) {
+		const sign = line.type === "add" ? "+" : line.type === "delete" ? "-" : " ";
+		const color =
+			line.type === "add" ? "toolDiffAdded" : line.type === "delete" ? "toolDiffRemoved" : "toolDiffContext";
+		lines.push(`${indent}${theme.fg(color, `${sign}${sanitizeLine(line.text)}`)}`);
+	}
+	const remaining = file.lines.length - visible.length;
+	if (remaining > 0) {
+		lines.push(`${indent}${theme.fg("muted", `… ${remaining} more lines`)}`);
+	}
+}
+
+interface CallPreviewOptions {
+	expanded: boolean;
+	argsComplete: boolean;
+	includeRoster: boolean;
+}
+
+function formatCallPreview(preview: PatchPreview, theme: RenderTheme, options: CallPreviewOptions): string {
 	if (preview.files.length === 0) return title(theme);
-	if (preview.files.length === 1) return singleHeader(preview.files[0] as PreviewFile, theme);
+	if (preview.files.length === 1) {
+		const file = preview.files[0] as PreviewFile;
+		const lines = [singleHeader(file, theme)];
+		if (options.argsComplete) appendGlimpse(lines, file, theme, options.expanded, "  ");
+		if (preview.truncated) lines.push(`  ${theme.fg("muted", "(large patch; preview truncated)")}`);
+		return lines.join("\n");
+	}
 
 	const lines = [multiHeader(preview.files, preview.added, preview.removed, theme)];
-	// Expanded results carry the roster and diffs, so avoid drawing it twice on the call row.
-	if (!expanded) {
-		const max = MAX_ROSTER_COLLAPSED;
-		const visible = preview.files.slice(0, max);
-		for (const file of visible) lines.push(rosterLine(file, theme));
-		const hidden = preview.files.length - visible.length;
-		if (hidden > 0) lines.push(hiddenFiles(hidden, theme));
+	const max = options.expanded ? MAX_ROSTER_EXPANDED : MAX_ROSTER_COLLAPSED;
+	const visible = preview.files.slice(0, max);
+	const focus = options.argsComplete ? focusFile(visible) : undefined;
+	if (options.includeRoster) {
+		for (const file of visible) {
+			lines.push(rosterLine(file, theme));
+			if (file === focus) appendGlimpse(lines, file, theme, options.expanded, "    ");
+		}
 	}
+	const hidden = preview.files.length - visible.length;
+	if (hidden > 0) lines.push(hiddenFiles(hidden, theme));
 	if (preview.truncated) lines.push(`  ${theme.fg("muted", "(large patch; preview truncated)")}`);
 	return lines.join("\n");
 }
 
-export function formatPatchCall(preview: PatchPreview, theme: RenderTheme, options: { expanded: boolean }): string {
-	return formatCallPreview(preview, theme, options.expanded);
+export function formatPatchCall(
+	preview: PatchPreview,
+	theme: RenderTheme,
+	options: { expanded: boolean; argsComplete: boolean },
+): string {
+	return formatCallPreview(preview, theme, { ...options, includeRoster: true });
 }
 
 interface RenderedDiff {
@@ -155,6 +212,7 @@ function previewFromChange(change: PatchResultChange): PreviewFile {
 		...(change.operation === "move" ? { targetPath: change.targetPath } : {}),
 		added: change.added,
 		removed: change.removed,
+		lines: [],
 	};
 }
 
@@ -172,7 +230,11 @@ export function formatPatchSummary(
 	theme: RenderTheme,
 	options: { expanded: boolean },
 ): string {
-	return formatCallPreview(previewFromResult(details), theme, options.expanded);
+	return formatCallPreview(previewFromResult(details), theme, {
+		expanded: options.expanded,
+		argsComplete: false,
+		includeRoster: !options.expanded,
+	});
 }
 
 function formatSingleResult(change: PatchResultChange, theme: RenderTheme, expanded: boolean): string {
