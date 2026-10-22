@@ -1,5 +1,19 @@
 import assert from "node:assert/strict";
-import fs, { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import fs, {
+	chmod,
+	link,
+	lstat,
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	readlink,
+	rm,
+	stat,
+	symlink,
+	truncate,
+	writeFile,
+} from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -238,6 +252,98 @@ describe("patch planning and application", () => {
 		await assert.rejects(readFile(path.join(cwd, "real/nested/new.txt")));
 	});
 
+	it("follows file symlinks for Add and Update and preserves the link", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "real.txt");
+		const linkPath = path.join(cwd, "link.txt");
+		await writeFile(target, "before\n");
+		await symlink("real.txt", linkPath);
+
+		const update = await planPatch(
+			cwd,
+			"*** Begin Patch\n*** Update File: link.txt\n@@\n-before\n+after\n*** End Patch",
+		);
+		await applyPatchPlan(update);
+		assert.equal(await readFile(target, "utf8"), "after\n");
+		assert.equal((await lstat(linkPath)).isSymbolicLink(), true);
+		assert.equal(await readlink(linkPath), "real.txt");
+
+		const overwrite = await planPatch(cwd, "*** Begin Patch\n*** Add File: link.txt\n+created\n*** End Patch");
+		await applyPatchPlan(overwrite);
+		assert.equal(await readFile(target, "utf8"), "created\n");
+		assert.equal((await lstat(linkPath)).isSymbolicLink(), true);
+	});
+
+	it("creates the target of a dangling file symlink on Add", { skip: process.platform === "win32" }, async () => {
+		const cwd = await workspace();
+		const linkPath = path.join(cwd, "link.txt");
+		await symlink("missing.txt", linkPath);
+		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: link.txt\n+created\n*** End Patch");
+		await applyPatchPlan(plan);
+		assert.equal(await readFile(path.join(cwd, "missing.txt"), "utf8"), "created\n");
+		assert.equal((await lstat(linkPath)).isSymbolicLink(), true);
+		assert.equal(await readlink(linkPath), "missing.txt");
+	});
+
+	it("refuses Delete and Move through a file symlink", { skip: process.platform === "win32" }, async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "real.txt");
+		const linkPath = path.join(cwd, "link.txt");
+		await writeFile(target, "value\n");
+		await symlink("real.txt", linkPath);
+		await assert.rejects(
+			planPatch(cwd, "*** Begin Patch\n*** Delete File: link.txt\n*** End Patch"),
+			/Delete File does not follow symbolic links/,
+		);
+		await assert.rejects(
+			planPatch(
+				cwd,
+				"*** Begin Patch\n*** Update File: link.txt\n*** Move to: moved.txt\n@@\n-value\n+changed\n*** End Patch",
+			),
+			/Move does not follow symbolic links/,
+		);
+		assert.equal(await readFile(target, "utf8"), "value\n");
+		assert.equal((await lstat(linkPath)).isSymbolicLink(), true);
+	});
+
+	it("rejects a file symlink retargeted between planning and apply", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const cwd = await workspace();
+		const first = path.join(cwd, "first.txt");
+		const second = path.join(cwd, "second.txt");
+		const linkPath = path.join(cwd, "link.txt");
+		await writeFile(first, "first\n");
+		await writeFile(second, "second\n");
+		await symlink("first.txt", linkPath);
+		const plan = await planPatch(
+			cwd,
+			"*** Begin Patch\n*** Update File: link.txt\n@@\n-first\n+changed\n*** End Patch",
+		);
+		await rm(linkPath);
+		await symlink("second.txt", linkPath);
+		await assert.rejects(applyPatchPlan(plan), /source link changed before apply/);
+		assert.equal(await readFile(first, "utf8"), "first\n");
+		assert.equal(await readFile(second, "utf8"), "second\n");
+	});
+
+	it("rejects oversized patches and sources before mutation", async () => {
+		const cwd = await workspace();
+		const hugePatch = `*** Begin Patch\n*** Add File: huge.txt\n+${"a".repeat(1024 * 1024)}\n*** End Patch`;
+		await assert.rejects(planPatch(cwd, hugePatch), /Patch is too large/);
+		await assert.rejects(readFile(path.join(cwd, "huge.txt")));
+
+		const target = path.join(cwd, "large.txt");
+		await writeFile(target, "value\n");
+		await truncate(target, 64 * 1024 * 1024 + 1);
+		await assert.rejects(
+			planPatch(cwd, "*** Begin Patch\n*** Update File: large.txt\n@@\n-value\n+changed\n*** End Patch"),
+			/Patch source is too large/,
+		);
+	});
+
 	it("rejects duplicate resolved paths and repeated headers like Codex", async () => {
 		const cwd = await workspace();
 		// openai/codex#37867: `duplicate.txt` and `./duplicate.txt` resolve to the same file.
@@ -270,7 +376,7 @@ describe("patch planning and application", () => {
 +two
 *** End Patch`,
 			),
-			/conflicting operations/,
+			/conflicting operations.*one \*\*\* Update File: header/,
 		);
 		assert.equal(await readFile(path.join(cwd, "update.txt"), "utf8"), "before\n");
 	});

@@ -91,6 +91,14 @@ describe("parsePatch", () => {
 			/Invalid patch format/,
 		);
 		assert.throws(
+			() => parsePatch("*** Begin Patch\n*** Add File: a.txt\n+value\n"),
+			/missing \*\*\* End Patch.*truncated/,
+		);
+		assert.throws(
+			() => parsePatch("*** Begin Patch\n*** Add File: a.txt\n+value\n+*** End Patch"),
+			/must not start with '\+'/,
+		);
+		assert.throws(
 			() => parsePatch("*** Begin Patch\n*** Add File: a.txt\ninvalid\n*** End Patch"),
 			/Add File lines must start/,
 		);

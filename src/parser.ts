@@ -11,8 +11,18 @@ function requirePath(value: string, header: string): string {
 export function parsePatch(patchText: string): PatchOperation[] {
 	const normalized = patchText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 	const lines = normalized.split("\n");
-	if (lines[0]?.trim() !== "*** Begin Patch" || lines.at(-1)?.trim() !== "*** End Patch") {
-		throw new Error("Invalid patch format: expected *** Begin Patch ... *** End Patch envelope");
+	const first = lines[0]?.trim();
+	const last = lines.at(-1)?.trim();
+	if (first !== "*** Begin Patch") {
+		throw new Error("Invalid patch format: expected *** Begin Patch as the first line");
+	}
+	if (last !== "*** End Patch") {
+		if (last === "+*** End Patch") {
+			throw new Error("Invalid patch format: *** End Patch must not start with '+'");
+		}
+		throw new Error(
+			"Invalid patch format: missing *** End Patch (the patch may have been truncated; split it into smaller patches)",
+		);
 	}
 
 	const operations: PatchOperation[] = [];

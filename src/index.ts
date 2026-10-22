@@ -44,7 +44,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	function wantsPatchcraft(ctx: ExtensionContext): boolean {
 		if (mode === "on") return true;
 		if (mode === "off") return false;
-		return isPatchcraftModel(ctx.model?.id);
+		return isPatchcraftModel(ctx.model?.id, ctx.model?.api);
 	}
 
 	function restoreState(ctx: ExtensionContext): void {
@@ -113,6 +113,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		promptSnippet: "Add, update, move, or delete files with apply_patch",
 		promptGuidelines: [
 			"Use apply_patch for file edits when available, combining related multi-file changes in one patch.",
+			"Keep each hunk's context short (2-3 lines) and split large edits into smaller patches.",
 		],
 		parameters: patchParameters,
 		annotations: {

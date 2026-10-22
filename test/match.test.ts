@@ -80,15 +80,22 @@ describe("applyChunks", () => {
 
 	it("throws when expected lines are missing", () => {
 		assert.throws(
+			() => applyChunks("a\nb\nc\n", "value.txt", [chunk({ oldLines: ["a", "x"], newLines: ["a", "y"] })]),
+			/Closest match at line 1 \(1\/2 lines matched\)/,
+		);
+	});
+
+	it("says when no line in the remaining file matches", () => {
+		assert.throws(
 			() => applyChunks("a\n", "value.txt", [chunk({ oldLines: ["missing"], newLines: ["x"] })]),
-			/Failed to find expected lines/,
+			/No line in the remaining file matched; re-read the file/,
 		);
 	});
 
 	it("throws when a context marker is missing", () => {
 		assert.throws(
 			() => applyChunks("a\n", "value.txt", [chunk({ contexts: ["missing"], newLines: ["x"] })]),
-			/Failed to find context/,
+			/No line in the remaining file matched/,
 		);
 	});
 });

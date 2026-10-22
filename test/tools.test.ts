@@ -13,6 +13,11 @@ describe("isPatchcraftModel", () => {
 		assert.equal(isPatchcraftModel("codex-platform-model"), false);
 		assert.equal(isPatchcraftModel(undefined), false);
 	});
+
+	it("also enables Codex Responses models without a gpt- prefix", () => {
+		assert.equal(isPatchcraftModel("codex-platform-model", "openai-codex-responses"), true);
+		assert.equal(isPatchcraftModel("gpt-5", "anthropic-messages"), true);
+	});
 });
 
 describe("reconcileActiveTools", () => {

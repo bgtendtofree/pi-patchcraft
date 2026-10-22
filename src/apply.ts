@@ -1,7 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, lstat, mkdir, open, readFile, rename, rm, unlink } from "node:fs/promises";
+import { access, lstat, mkdir, open, readFile, readlink, rename, rm, unlink } from "node:fs/promises";
 import path from "node:path";
 import { generateDiffString, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { applyChunks, splitBom } from "./match.ts";
@@ -15,19 +15,83 @@ import {
 import type { PatchPlan, PlannedFileChange } from "./types.ts";
 
 interface FileState {
+	kind: "file";
 	content: Buffer;
 	mode: number;
+	/** Operational path: the symlink target for an existing file, otherwise the submitted path. */
+	path: string;
+	/** Submitted absolute symlink path when one was followed, so retargeting is detected. */
+	linkPath: string | undefined;
 }
 
-async function readState(absolutePath: string): Promise<FileState | undefined> {
+interface DanglingLinkState {
+	kind: "dangling";
+	path: string;
+	linkPath: string;
+}
+
+interface LinkResolution {
+	path: string;
+	stats: Awaited<ReturnType<typeof lstat>> | undefined;
+	followed: boolean;
+}
+
+/** Codex caps are not specified; match pi-codex-tools so a huge patch or source cannot exhaust memory. */
+const MAX_PATCH_BYTES = 1024 * 1024;
+const MAX_SOURCE_BYTES = 64 * 1024 * 1024;
+const MAX_LINK_DEPTH = 40;
+
+async function resolveLinkChain(absolutePath: string): Promise<LinkResolution> {
+	let current = absolutePath;
+	let followed = false;
+	for (let depth = 0; depth < MAX_LINK_DEPTH; depth++) {
+		let stats: Awaited<ReturnType<typeof lstat>>;
+		try {
+			stats = await lstat(current);
+		} catch (error) {
+			if (isErrorCode(error, "ENOENT") || isErrorCode(error, "ENOTDIR")) {
+				return { path: current, stats: undefined, followed };
+			}
+			throw error;
+		}
+		if (!stats.isSymbolicLink()) return { path: current, stats, followed };
+		followed = true;
+		current = path.resolve(path.dirname(current), await readlink(current));
+	}
+	throw new Error(`Too many symbolic links: ${absolutePath}`);
+}
+
+async function pathExists(absolutePath: string): Promise<boolean> {
 	try {
-		const stats = await lstat(absolutePath);
-		if (!stats.isFile()) throw new Error(`Patch target is not a regular file: ${absolutePath}`);
-		return { content: await readFile(absolutePath), mode: stats.mode };
+		await lstat(absolutePath);
+		return true;
 	} catch (error) {
-		if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return undefined;
+		if (isErrorCode(error, "ENOENT") || isErrorCode(error, "ENOTDIR")) return false;
 		throw error;
 	}
+}
+
+async function readState(absolutePath: string): Promise<FileState | DanglingLinkState | undefined> {
+	const resolved = await resolveLinkChain(absolutePath);
+	if (!resolved.stats) {
+		return resolved.followed ? { kind: "dangling", path: resolved.path, linkPath: absolutePath } : undefined;
+	}
+	if (!resolved.stats.isFile()) throw new Error(`Patch target is not a regular file: ${resolved.path}`);
+	const size = Number(resolved.stats.size);
+	if (size > MAX_SOURCE_BYTES) {
+		throw new Error(`Patch source is too large: ${resolved.path} (${size} bytes exceeds 64 MiB limit)`);
+	}
+	const content = await readFile(resolved.path);
+	if (content.length > MAX_SOURCE_BYTES) {
+		throw new Error(`Patch source is too large: ${resolved.path} (${content.length} bytes exceeds 64 MiB limit)`);
+	}
+	return {
+		kind: "file",
+		content,
+		mode: Number(resolved.stats.mode),
+		path: resolved.path,
+		linkPath: resolved.followed ? absolutePath : undefined,
+	};
 }
 
 function createChange(input: Omit<PlannedFileChange, "displayDiff" | "added" | "removed">): PlannedFileChange {
@@ -43,11 +107,22 @@ function createChange(input: Omit<PlannedFileChange, "displayDiff" | "added" | "
 }
 
 function assertUniqueChanges(changes: PlannedFileChange[]): void {
-	const touched = new Set<string>();
+	const touched = new Map<string, PlannedFileChange>();
 	for (const change of changes) {
 		for (const candidate of new Set([change.identityPath, change.identityTargetPath])) {
-			if (touched.has(candidate)) throw new Error(`Patch contains conflicting operations for ${candidate}`);
-			touched.add(candidate);
+			const previous = touched.get(candidate);
+			if (previous) {
+				const repeatedUpdate =
+					candidate === change.absolutePath &&
+					candidate === previous.absolutePath &&
+					(change.operation === "update" || change.operation === "move") &&
+					(previous.operation === "update" || previous.operation === "move");
+				const hint = repeatedUpdate
+					? "; put multiple hunks under one *** Update File: header instead of repeating it"
+					: "";
+				throw new Error(`Patch contains conflicting operations for ${candidate}${hint}`);
+			}
+			touched.set(candidate, change);
 		}
 	}
 }
@@ -169,6 +244,10 @@ async function assertNoNameAliasConflicts(changes: PlannedFileChange[]): Promise
 
 export async function planPatch(cwd: string, patchText: string, signal?: AbortSignal): Promise<PatchPlan> {
 	signal?.throwIfAborted();
+	const patchBytes = Buffer.byteLength(patchText, "utf8");
+	if (patchBytes > MAX_PATCH_BYTES) {
+		throw new Error(`Patch is too large: ${patchBytes} bytes exceeds 1 MiB limit`);
+	}
 	const operations = parsePatch(patchText);
 	const changes: PlannedFileChange[] = [];
 
@@ -178,10 +257,15 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 		const absolutePath = resolved.absolute;
 		const lexicalPath = resolved.lexical;
 		const state = await readState(absolutePath);
+		// Follow a file symlink to its target so the link itself survives an atomic rename. A dangling
+		// link keeps its target path so Add can create it, like Codex and Pi's file tools.
+		const operationalPath = state?.path ?? absolutePath;
+		const sourceLinkPath = state?.linkPath;
 		// Identity is separate from the operational path: existing files use realpath, missing files
 		// keep their exact spelling. Potential case and normalization aliases are handled in one pass
 		// after planning, so a normal add never causes a directory listing.
-		const identityPath = state ? ((await resolveExistingIdentity(absolutePath)) ?? absolutePath) : absolutePath;
+		const identityPath =
+			state?.kind === "file" ? ((await resolveExistingIdentity(state.path)) ?? state.path) : operationalPath;
 
 		if (operation.type === "add") {
 			// Codex creates or overwrites an Add File target; a pre-existing file is captured for rollback.
@@ -190,23 +274,27 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 					operation: "add",
 					path: operation.path,
 					targetPath: operation.path,
-					absolutePath,
-					absoluteTargetPath: absolutePath,
+					absolutePath: operationalPath,
+					absoluteTargetPath: operationalPath,
 					lexicalPath,
 					lexicalTargetPath: lexicalPath,
 					identityPath,
 					identityTargetPath: identityPath,
-					before: state?.content,
+					...(sourceLinkPath === undefined ? {} : { sourceLinkPath }),
+					before: state?.kind === "file" ? state.content : undefined,
 					after: Buffer.from(operation.content),
-					mode: state?.mode,
+					mode: state?.kind === "file" ? state.mode : undefined,
 					fuzz: 0,
 				}),
 			);
 			continue;
 		}
 
-		if (!state) throw new Error(`Patch target does not exist: ${operation.path}`);
+		if (!state || state.kind === "dangling") throw new Error(`Patch target does not exist: ${operation.path}`);
 		if (operation.type === "delete") {
+			if (sourceLinkPath) {
+				throw new Error(`Delete File does not follow symbolic links: ${operation.path}; remove the link directly`);
+			}
 			changes.push(
 				createChange({
 					operation: "delete",
@@ -227,6 +315,10 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 			continue;
 		}
 
+		if (sourceLinkPath && operation.moveTo !== undefined) {
+			throw new Error(`Move does not follow symbolic links: ${operation.path}; move the target or the link directly`);
+		}
+
 		// Buffers can hold arbitrary bytes. Text matching would replace invalid sequences with U+FFFD
 		// and corrupt untouched content, so reject unsupported encodings before any mutation.
 		if (!isUtf8(state.content)) throw new Error(`Patch source is not valid UTF-8: ${operation.path}`);
@@ -236,7 +328,7 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 		const updated = applyChunks(text, operation.path, operation.chunks);
 
 		const targetPath = operation.moveTo ?? operation.path;
-		let absoluteTargetPath = absolutePath;
+		let absoluteTargetPath = operationalPath;
 		let lexicalTargetPath = lexicalPath;
 		let identityTargetPath = identityPath;
 		if (operation.moveTo !== undefined) {
@@ -245,14 +337,14 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 			// the in-place behavior; any other spelling of an existing file is still a rejected target,
 			// including case-insensitive or normalization aliases of the source itself.
 			if (resolvedTarget.absolute !== absolutePath) {
-				if (await readState(resolvedTarget.absolute)) throw new Error(`Move target already exists: ${targetPath}`);
+				if (await pathExists(resolvedTarget.absolute)) throw new Error(`Move target already exists: ${targetPath}`);
 				absoluteTargetPath = resolvedTarget.absolute;
 				lexicalTargetPath = resolvedTarget.lexical;
 				identityTargetPath = resolvedTarget.absolute;
 			}
 		}
 		const after = Buffer.from(`${bom}${updated.content}`);
-		if (absoluteTargetPath === absolutePath && after.equals(state.content)) {
+		if (absoluteTargetPath === operationalPath && after.equals(state.content)) {
 			throw new Error(`Update produced no changes: ${operation.path}`);
 		}
 		changes.push(
@@ -260,12 +352,13 @@ export async function planPatch(cwd: string, patchText: string, signal?: AbortSi
 				operation: operation.moveTo === undefined ? "update" : "move",
 				path: operation.path,
 				targetPath,
-				absolutePath,
+				absolutePath: operationalPath,
 				absoluteTargetPath,
 				lexicalPath,
 				lexicalTargetPath,
 				identityPath,
 				identityTargetPath,
+				...(sourceLinkPath === undefined ? {} : { sourceLinkPath }),
 				before: state.content,
 				after,
 				mode: state.mode,
@@ -411,19 +504,25 @@ async function withQueues<T>(paths: string[], index: number, callback: () => Pro
 
 async function validatePlanState(plan: PatchPlan): Promise<void> {
 	for (const change of plan.changes) {
+		if (change.sourceLinkPath) {
+			const currentLink = await resolveLinkChain(change.sourceLinkPath);
+			if (currentLink.path !== change.absolutePath) {
+				throw new Error(`Patch source link changed before apply: ${change.path}`);
+			}
+		}
 		const source = await readState(change.absolutePath);
 		if (change.before === undefined) {
 			if (source !== undefined) throw new Error(`Patch target changed before apply: ${change.path}`);
 		} else {
-			if (!source?.content.equals(change.before)) {
+			if (source?.kind !== "file" || !source.content.equals(change.before)) {
 				throw new Error(`Patch source changed before apply: ${change.path}`);
 			}
 			// Do not overwrite permissions the user changed after planning; reject instead of restoring.
-			if (change.mode !== undefined && source.mode !== undefined && (source.mode & 0o7777) !== (change.mode & 0o7777)) {
+			if (change.mode !== undefined && (source.mode & 0o7777) !== (change.mode & 0o7777)) {
 				throw new Error(`Patch source permissions changed before apply: ${change.path}`);
 			}
 		}
-		if (change.absoluteTargetPath !== change.absolutePath && (await readState(change.absoluteTargetPath))) {
+		if (change.absoluteTargetPath !== change.absolutePath && (await pathExists(change.absoluteTargetPath))) {
 			throw new Error(`Patch target changed before apply: ${change.targetPath}`);
 		}
 	}
@@ -436,7 +535,14 @@ async function validatePlanState(plan: PatchPlan): Promise<void> {
  */
 function mutationQueueKeys(change: PlannedFileChange): string[] {
 	const source = change.before === undefined ? change.lexicalPath : change.identityPath;
-	if (change.absoluteTargetPath === change.absolutePath) return [source];
+	if (change.absoluteTargetPath === change.absolutePath) {
+		// A missing target reached through a dangling symlink or symlinked parent is written at its
+		// canonical path, so lock that spelling too. Otherwise another plan could take only that key.
+		if (change.before === undefined && change.absolutePath !== change.lexicalPath) {
+			return [source, change.absolutePath];
+		}
+		return [source];
+	}
 	return [source, change.lexicalTargetPath];
 }
 

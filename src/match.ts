@@ -45,6 +45,41 @@ function normalizeLine(value: string): string {
 		.replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
 }
 
+/** On a miss, show the closest remaining window with line numbers so the model can re-read and retry. */
+function describeClosestMatch(lines: readonly string[], pattern: readonly string[], start: number): string {
+	if (pattern.length === 0 || lines.length === 0) return "";
+	const first = Math.max(0, Math.min(start, lines.length - 1));
+	const comparedPattern = pattern.slice(0, 20);
+	let bestIndex = first;
+	let bestMatched = 0;
+	let budget = 200_000;
+	for (let index = first; index < lines.length && budget > 0; index++) {
+		budget--;
+		let matched = 0;
+		while (
+			matched < comparedPattern.length &&
+			index + matched < lines.length &&
+			budget > 0 &&
+			normalizeLine(lines[index + matched] ?? "") === normalizeLine(comparedPattern[matched] ?? "")
+		) {
+			matched++;
+			budget--;
+		}
+		if (matched > bestMatched) {
+			bestMatched = matched;
+			bestIndex = index;
+		}
+	}
+	if (bestMatched === 0) {
+		return "No line in the remaining file matched; re-read the file and retry with current content.";
+	}
+	const lineNumber = bestIndex + 1;
+	const excerpt = lines
+		.slice(bestIndex, bestIndex + Math.min(pattern.length, 5))
+		.map((line, offset) => `${lineNumber + offset}: ${line.slice(0, 200)}`);
+	return `Closest match at line ${lineNumber} (${bestMatched}/${comparedPattern.length} lines matched):\n${excerpt.join("\n")}`;
+}
+
 function findSequence(
 	lines: readonly string[],
 	pattern: readonly string[],
@@ -123,7 +158,11 @@ function computeReplacements(
 	for (const chunk of chunks) {
 		for (const context of chunk.contexts) {
 			const contextMatch = findSequence(originalLines, [context], lineIndex, false);
-			if (!contextMatch) throw new Error(`Failed to find context '${context}' in ${filePath}`);
+			if (!contextMatch) {
+				throw new Error(
+					`Failed to find context '${context}' in ${filePath}.\n${describeClosestMatch(originalLines, [context], lineIndex)}`,
+				);
+			}
 			lineIndex = contextMatch.index + 1;
 			fuzz += contextMatch.fuzz;
 		}
@@ -143,7 +182,11 @@ function computeReplacements(
 			if (newLines.at(-1) === "") newLines = newLines.slice(0, -1);
 			match = findSequence(originalLines, pattern, lineIndex, chunk.endOfFile);
 		}
-		if (!match) throw new Error(`Failed to find expected lines in ${filePath}:\n${chunk.oldLines.join("\n")}`);
+		if (!match) {
+			throw new Error(
+				`Failed to find expected lines in ${filePath}:\n${chunk.oldLines.join("\n")}\n${describeClosestMatch(originalLines, chunk.oldLines, lineIndex)}`,
+			);
+		}
 		fuzz += match.fuzz;
 
 		// Keep context lines untouched so their exact text and terminator survive mixed line endings.

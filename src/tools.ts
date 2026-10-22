@@ -2,7 +2,8 @@
 const MANAGED_TOOLS = new Set(["apply_patch", "edit", "write"]);
 
 /** Patchcraft owns `apply_patch` for GPT/Codex-family models unless the mode overrides it. */
-export function isPatchcraftModel(modelId: string | undefined): boolean {
+export function isPatchcraftModel(modelId: string | undefined, api?: string): boolean {
+	if (api === "openai-codex-responses") return true;
 	return modelId?.toLowerCase().split("/").pop()?.startsWith("gpt-") ?? false;
 }
 

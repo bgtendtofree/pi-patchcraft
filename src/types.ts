@@ -45,6 +45,8 @@ export interface PlannedFileChange {
 	/** Conflict-check and mutation-lock identity. Case-folded on case-insensitive filesystems. */
 	identityPath: string;
 	identityTargetPath: string;
+	/** Submitted absolute symlink path followed during planning; revalidated before apply. */
+	sourceLinkPath?: string;
 	before: Buffer | undefined;
 	after: Buffer | undefined;
 	mode: number | undefined;
