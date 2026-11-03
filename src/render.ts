@@ -1,6 +1,6 @@
 /** Codex-style summary and diff presentation for apply_patch. Execution never imports this module. */
 import os from "node:os";
-import { keyHint, renderDiff, type ThemeColor } from "@earendil-works/pi-coding-agent";
+import { type KeybindingHints, renderDiff, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { PatchPreview, PreviewFile } from "./preview.ts";
 import type { PatchResultChange, PatchResultDetails } from "./types.ts";
@@ -9,6 +9,12 @@ export interface RenderTheme {
 	fg(color: ThemeColor, text: string): string;
 	bold(text: string): string;
 }
+
+/**
+ * Pi injects the hint helpers into the render context so they read the running instance's configured
+ * keys. Importing `keyHint()` from the package can resolve another copy that never saw them.
+ */
+export type KeyHint = KeybindingHints["keyHint"];
 
 interface TextBlock {
 	type: string;
@@ -194,13 +200,13 @@ function indent(lines: readonly string[], prefix: string): string[] {
 	return lines.map((line) => `${prefix}${line}`);
 }
 
-function truncationHint(theme: RenderTheme, expanded: boolean): string {
+function truncationHint(theme: RenderTheme, expanded: boolean, keyHint: KeyHint): string {
 	return expanded
 		? `  ${theme.fg("muted", "… output truncated")}`
 		: `  ${theme.fg("muted", `… more lines, ${keyHint("app.tools.expand", "to expand")}`)}`;
 }
 
-function expandHint(theme: RenderTheme): string {
+function expandHint(theme: RenderTheme, keyHint: KeyHint): string {
 	return `  ${theme.fg("muted", keyHint("app.tools.expand", "to expand diffs"))}`;
 }
 
@@ -242,9 +248,14 @@ function formatSingleResult(change: PatchResultChange): string {
 	return diff.lines.join("\n");
 }
 
-function formatMultiResult(details: PatchResultDetails, theme: RenderTheme, expanded: boolean): string {
+function formatMultiResult(
+	details: PatchResultDetails,
+	theme: RenderTheme,
+	expanded: boolean,
+	keyHint: KeyHint,
+): string {
 	const hasDiff = details.changes.some((change) => change.displayDiff.trim().length > 0);
-	if (!expanded) return hasDiff ? expandHint(theme) : "";
+	if (!expanded) return hasDiff ? expandHint(theme, keyHint) : "";
 
 	const max = MAX_ROSTER_EXPANDED;
 	const visible = details.changes.slice(0, max);
@@ -264,18 +275,18 @@ function formatMultiResult(details: PatchResultDetails, theme: RenderTheme, expa
 	}
 	const hidden = details.changes.length - visible.length;
 	if (hidden > 0) lines.push(hiddenFiles(hidden, theme));
-	if (truncated) lines.push(truncationHint(theme, true));
+	if (truncated) lines.push(truncationHint(theme, true, keyHint));
 	return lines.join("\n");
 }
 
 export function formatPatchResult(
 	details: PatchResultDetails,
 	theme: RenderTheme,
-	options: { expanded: boolean },
+	options: { expanded: boolean; keyHint: KeyHint },
 ): string {
 	if (details.changes.length === 0) return "";
 	if (details.changes.length === 1) return formatSingleResult(details.changes[0] as PatchResultChange);
-	return formatMultiResult(details, theme, options.expanded);
+	return formatMultiResult(details, theme, options.expanded, options.keyHint);
 }
 
 function textContent(content: readonly TextBlock[]): string {

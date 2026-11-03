@@ -178,7 +178,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			}
 			component.setText(
 				details
-					? formatPatchResult(details, theme, { expanded: options.expanded })
+					? formatPatchResult(details, theme, { expanded: options.expanded, keyHint: context.keyHint })
 					: formatPatchProgress(result.content, theme),
 			);
 			return component;

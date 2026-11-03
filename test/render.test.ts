@@ -19,6 +19,9 @@ const theme: RenderTheme = {
 	bold: (text) => text,
 };
 
+/** Stands in for Pi's injected helper so tests prove the hint comes from the render context. */
+const keyHint = (keybinding: string, description: string) => `<${keybinding}> ${description}`;
+
 function details(changes: PatchResultDetails["changes"]): PatchResultDetails {
 	return {
 		changes,
@@ -105,7 +108,7 @@ describe("formatPatchResult", () => {
 				},
 			]),
 			theme,
-			{ expanded: false },
+			{ expanded: false, keyHint },
 		);
 		assert.match(text, /old/);
 		assert.match(text, /new/);
@@ -127,7 +130,7 @@ describe("formatPatchResult", () => {
 				},
 			]),
 			theme,
-			{ expanded: false },
+			{ expanded: false, keyHint },
 		);
 		assert.match(text, /line250/);
 		assert.doesNotMatch(text, /more lines/);
@@ -154,10 +157,11 @@ describe("formatPatchResult", () => {
 				fuzz: 0,
 			},
 		]);
-		const collapsed = formatPatchResult(result, theme, { expanded: false });
+		const collapsed = formatPatchResult(result, theme, { expanded: false, keyHint });
 		assert.doesNotMatch(collapsed, /old/);
 		assert.doesNotMatch(collapsed, /└/);
-		const expanded = formatPatchResult(result, theme, { expanded: true });
+		assert.match(collapsed, /<app\.tools\.expand> to expand diffs/);
+		const expanded = formatPatchResult(result, theme, { expanded: true, keyHint });
 		assert.match(expanded, /└ M a\.ts/);
 		assert.match(expanded, /old/);
 		assert.match(expanded, /added/);

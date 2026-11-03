@@ -445,10 +445,16 @@ describe("pi-patchcraft extension", () => {
 		assert.match(callText, /-before/);
 		assert.match(callText, /\+after/);
 
+		const renderKeyHint = (keybinding: string, description: string) => `${keybinding} ${description}`;
 		const result = await tool.execute("render", { patch }, undefined, undefined, { cwd });
 		const rendered = (
 			tool.renderResult as (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown
-		)(result, { expanded: false, isPartial: false }, theme, { isError: false, lastComponent: undefined, state });
+		)(result, { expanded: false, isPartial: false }, theme, {
+			isError: false,
+			lastComponent: undefined,
+			keyHint: renderKeyHint,
+			state,
+		});
 		assert.ok(rendered);
 		const resultText = stripTerminalSequences((rendered as { render(width: number): string[] }).render(80).join("\n"));
 		assert.match(resultText, /before/);
@@ -465,7 +471,7 @@ describe("pi-patchcraft extension", () => {
 			{ content: [{ type: "text", text: "failed" }], details: undefined },
 			{ expanded: false, isPartial: false },
 			theme,
-			{ isError: true, lastComponent: undefined },
+			{ isError: true, lastComponent: undefined, keyHint: renderKeyHint },
 		);
 		assert.ok(error);
 	});

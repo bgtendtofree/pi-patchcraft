@@ -92,6 +92,7 @@ Content positioning follows Codex: context-less additions append at end of file,
 - `src/preview.ts` may scan partial patch arguments for display only, including a bounded glimpse after arguments complete. It must be tolerant, bounded, cached, and never feed execution.
 - The call row owns the summary; the result renderer adds diffs or the expand hint and must not repeat the summary.
 - Show a single-file result diff in full like Pi's `edit`; bound only multi-file rosters and diffs.
+- Take `keyHint()` from the render context, never from the package import. The package copy can resolve another module instance that never saw Pi's configured keys, so hints render without the key.
 - Do not repeat the success `content` text; render error `content` as-is.
 - Preserve normal progress updates, errors, and returned `content`/`details`/`structuredContent`, including `displayDiff`, added/removed counts, and fuzz.
 - Tests must assert summary labels/counts, roster and diff rendering, streaming bounds, error output, and unchanged execution/result data.
