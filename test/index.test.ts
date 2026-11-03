@@ -10,9 +10,9 @@ import {
 	initTheme,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { compile } from "@earendil-works/pi-schema";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
-import { Check } from "typebox/value";
 import piPatchcraft from "../src/index.ts";
 import type { PatchResultDetails } from "../src/types.ts";
 
@@ -185,6 +185,13 @@ describe("pi-patchcraft extension", () => {
 		assert.deepEqual(result?.structuredContent, details);
 		assert.deepEqual(Object.keys(result?.structuredContent ?? {}).sort(), ["added", "changes", "fuzz", "removed"]);
 		assert.deepEqual(Object.keys(tool.outputSchema?.properties ?? {}).sort(), ["added", "changes", "fuzz", "removed"]);
+		// Pi hands this schema to codemode scripts, so it has to compile under Pi's validator too.
+		const outputValidator = compile(tool.outputSchema as TSchema, { coerce: true });
+		assert.equal(outputValidator.check(details), true);
+		assert.equal(
+			outputValidator.check({ ...details, changes: [{ ...change, operation: "rename" }] } as unknown),
+			false,
+		);
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
 		await assert.rejects(tool.execute("empty", { patch: "" }, undefined, undefined, { cwd }), /patch is required/);
 		await assert.rejects(tool.execute("invalid", { patch: "invalid" }, undefined, undefined, { cwd }));
@@ -195,10 +202,20 @@ describe("pi-patchcraft extension", () => {
 		const { tool } = extensionHarness([]);
 		const patch = "*** Begin Patch\n*** Add File: value.txt\n+value\n*** End Patch";
 		assert.equal(Object.hasOwn(tool, "prepareArguments"), false);
-		assert.equal(Check(tool.parameters, { patch }), true);
-		for (const input of [undefined, null, patch, { input: patch }, { patchText: patch }, { patch: 1 }]) {
-			assert.equal(Check(tool.parameters, input), false);
+		// Pi validates tool arguments with pi-schema and coerces loosely typed values first, so the
+		// schema has to keep compiling there rather than in TypeBox's own checker.
+		const validator = compile(tool.parameters, { coerce: true });
+		assert.deepEqual(validator.parse({ patch }), { ok: true, value: { patch } });
+		for (const input of [undefined, null, patch, { input: patch }, { patchText: patch }]) {
+			assert.equal(validator.check(input), false, JSON.stringify(input));
 		}
+		assert.deepEqual(validator.parse({}), {
+			ok: false,
+			errors: [{ path: "/patch", keyword: "required", message: "missing" }],
+		});
+		// Coercion turns a scalar into a string before `execute()`. `execute()` keeps guarding the
+		// content: a coerced value such as "1" is not a patch and the parser rejects it.
+		assert.deepEqual(validator.parse({ patch: 1 }), { ok: true, value: { patch: "1" } });
 	});
 
 	it("supports session-scoped automatic, forced-on, and forced-off modes", async () => {

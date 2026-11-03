@@ -140,7 +140,7 @@ Patch execution and returned `content`, `details`, and `structuredContent` are u
 
 ## Development
 
-Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.19.0 with Pi 1.4.0.
+Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.22.2 with Pi 1.5.0.
 
 ```bash
 mise install
@@ -166,17 +166,21 @@ pi -e ./src/index.ts
 
 Development and package smoke tests pin:
 
-- Node.js 24.19.0 through mise
+- Node.js 24.22.2 through mise
 - npm locked dependencies
-- Pi 1.4.0
+- Pi 1.5.0
 - TypeScript 7
 
-Pi 1.4.0 is the development baseline; runtime dependencies remain `"*"` peer dependencies. Grammar sampling, structured results, file mutation queues, and codemode prompt guidelines are unchanged.
+Pi 1.5.0 is the development baseline; runtime dependencies remain `"*"` peer dependencies. Grammar sampling, structured results, file mutation queues, and codemode prompt guidelines are unchanged.
 
-Relevant Pi 1.3/1.4 changes:
+Relevant Pi 1.3–1.5 changes:
 
 | Feature / API | Patchcraft impact |
 |---|---|
+| Tool arguments validate through `@earendil-works/pi-schema` instead of TypeBox (1.5) | `patchParameters` stays a plain JSON Schema object with one required string, which `pi-schema` compiles unchanged. Patchcraft uses no TypeBox-only feature (`Type.Refine()`, codecs, `Format.Set()`, `Type.BigInt()`), so no refinement moved into `execute()`. Validation errors the model sees now use `pi-schema` wording (`- patch: missing`), and the argument tests run the same validator the agent loop uses. |
+| Pre-validation coercion (1.5) | Numeric and null arguments are coerced to strings before `execute()`, so `{ patch: 1 }` arrives as `"1"`. The parser, not the schema, rejects it; the constrained-sampling path is unaffected because the grammar already produces a string. |
+| Extension changelogs after an update (1.5) | Optional. Pi reads `pi.changelogPath` or a root `CHANGELOG.md`; Patchcraft ships neither, so nothing is shown and no configuration is needed. |
+| Keybinding hints injected into render contexts (1.5) | `render.ts` calls the package-level `keyHint()` it already imported. Pi documents the injected `context.keyHint` as the safer source, which is a follow-up rather than a behavior change in this upgrade. |
 | Resumed sessions keep their active tools (1.3) | Patchcraft captures its baseline before the first replacement and restores only managed `edit`/`write`; reload, resume, tree, and fork tests cover this. |
 | Extension tools active unless `defaultActive: false` (1.4) | A branch without baseline metadata still captures the current tools conservatively instead of guessing `edit`/`write` back on. |
 | `before_agent_start` union and busy-during-start | Patchcraft ignores the event body and calls `syncTools(ctx)`; it never sends a message during start. |

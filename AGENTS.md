@@ -9,11 +9,11 @@ Patchcraft provides Pi with a transactional Codex-style `apply_patch` tool. Pres
 ## Stack
 
 - Runtime: Node.js `>=24` through Pi
-- Development tooling: Node.js 24.19.0 through project mise config and npm
+- Development tooling: Node.js 24.22.2 through project mise config and npm
 - TypeScript 7, strict mode, ES2024
 - Formatting and linting: Biome
 - Tests: Node.js `node:test`
-- Pi development baseline: `@earendil-works/pi-coding-agent` 1.4.0
+- Pi development baseline: `@earendil-works/pi-coding-agent` 1.5.0
 
 Pi loads the TypeScript files directly. Runtime source and tests use separate TypeScript configs.
 
@@ -40,7 +40,7 @@ Keep `index.ts` thin. Put pure parsing, matching, and path logic in focused modu
 - Prefer explicit unions and named interfaces over enums and ambiguous booleans.
 - Prefer whole-object assertions in tests when practical.
 - Throw from tool execution to report failure; returning an error-shaped result is still a successful Pi tool call.
-- Use only documented exports from `@earendil-works/pi-coding-agent` and `typebox`.
+- Use only documented exports from `@earendil-works/pi-coding-agent`, `@earendil-works/pi-schema`, `@earendil-works/pi-tui`, and `typebox`.
 
 ## Patch Language Contract
 
@@ -48,6 +48,8 @@ Keep `index.ts` thin. Put pure parsing, matching, and path logic in focused modu
 - Public schema remains `{ patch: string }`. Do not add input aliases or argument compatibility shims; Pi maps raw grammar input to `patch` before schema validation.
 - Keep `patchResultSchema` mirroring `PatchResultDetails`; `codemode` scripts receive it as the tool's `structuredContent`.
 - Keep the parameter schema to exactly one required string property. Pi's grammar constrained sampling requires it and rejects every request on grammar-capable models otherwise, so `src/grammar.ts` and `patchParameters` must stay in sync.
+- Keep `patchParameters` plain JSON Schema. Pi validates tool arguments with `@earendil-works/pi-schema`, so TypeBox-only features (`Type.Refine()`, codecs, `Format.Set()` formats, `Type.BigInt()`) never apply; enforce such constraints in the parser instead.
+- Pi's validator coerces loosely typed scalars before `execute()` (`{ patch: 1 }` arrives as `"1"`). Keep argument-validation tests on `@earendil-works/pi-schema`, not TypeBox `Check`, so they describe what the model actually gets.
 - Support Add, Delete, Update, optional Move, stacked `@@` context, `*** End of File`, and multi-file envelopes.
 - Reject two operations that resolve to the same file in one envelope (Codex parity, `openai/codex#37867`): a repeated `*** Update File:` header is invalid, and a move destination colliding with any other source or destination is rejected as well. That destination check is stricter than Codex main (`openai/codex#53409`).
 - `Add File` creates or overwrites a target, matching Codex; a pre-existing file is captured as `before` for rollback.
