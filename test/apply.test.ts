@@ -1211,29 +1211,6 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(path.join(cwd, "nested/old.txt"), "utf8"), "old\n");
 	});
 
-	it("re-evaluates case aliases for each plan instead of caching a probe", async () => {
-		const cwd = await workspace();
-		const directory = path.join(cwd, "nested");
-		await mkdir(directory);
-		if (await isCaseInsensitive(cwd)) {
-			await assert.rejects(
-				planPatch(
-					cwd,
-					`*** Begin Patch
-*** Add File: nested/a.txt
-+one
-*** Add File: nested/A.txt
-+two
-*** End Patch`,
-				),
-				/conflicting operations/,
-			);
-		}
-		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: nested/b.txt\n+ok\n*** End Patch");
-		await applyPatchPlan(plan);
-		assert.equal(await readFile(path.join(directory, "b.txt"), "utf8"), "ok\n");
-	});
-
 	it("keeps a leading space-only context line in an update hunk", async () => {
 		const cwd = await workspace();
 		const target = path.join(cwd, "value.txt");

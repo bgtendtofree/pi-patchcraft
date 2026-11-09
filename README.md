@@ -53,7 +53,7 @@ Tool input uses Pi's public JSON tool API:
 }
 ```
 
-Tool arguments must use `{ patch: string }`. The aliases `input` and `patchText`, and raw string arguments, are not accepted.
+Tool arguments must be an object with the required `patch` string. Extra properties such as `input` or `patchText` are ignored, and a raw string argument is rejected.
 
 The tool declares an output schema, so a [`codemode`](https://pi.dev/docs/codemode) script receives `{ changes, added, removed, fuzz }` from `tools.apply_patch(...)` instead of the text result. The model-facing content is unchanged.
 
@@ -149,7 +149,6 @@ npm run quality
 npm run typecheck
 npm test
 npm run test:coverage
-npm run smoke
 npm run package:check
 npm run smoke:package
 npm run ci

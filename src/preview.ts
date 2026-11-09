@@ -5,11 +5,11 @@
  * it ignores malformed lines, caps its work, and coalesces repeated headers for the roster.
  */
 
-export type PreviewOperation = "add" | "update" | "delete" | "move";
+type PreviewOperation = "add" | "update" | "delete" | "move";
 
-export type PreviewLineType = "add" | "delete" | "context";
+type PreviewLineType = "add" | "delete" | "context";
 
-export interface PreviewLine {
+interface PreviewLine {
 	type: PreviewLineType;
 	text: string;
 }
@@ -30,7 +30,7 @@ export interface PatchPreview {
 	truncated: boolean;
 }
 
-const MAX_PREVIEW_BYTES = 256 * 1024;
+const MAX_PREVIEW_CHARS = 256 * 1024;
 const MAX_PREVIEW_FILES = 500;
 const MAX_PREVIEW_LINES = 2000;
 const MAX_PREVIEW_LINES_PER_FILE = 500;
@@ -45,7 +45,7 @@ const MOVE = "*** Move to: ";
 const END_OF_FILE = "*** End of File";
 
 export function scanPatchPreview(input: string): PatchPreview {
-	const capped = input.length > MAX_PREVIEW_BYTES ? input.slice(0, MAX_PREVIEW_BYTES) : input;
+	const capped = input.length > MAX_PREVIEW_CHARS ? input.slice(0, MAX_PREVIEW_CHARS) : input;
 	const lines = capped.split("\n");
 	const files: PreviewFile[] = [];
 	const byPath = new Map<string, PreviewFile>();
@@ -108,7 +108,7 @@ export function scanPatchPreview(input: string): PatchPreview {
 			files.push(current);
 			continue;
 		}
-		if (!current || current.operation === "delete" || line.startsWith("@@") || line === "") continue;
+		if (!current || current.operation === "delete" || line.startsWith("@@")) continue;
 		if (current.operation === "add") {
 			if (line.startsWith("+")) {
 				current.added++;

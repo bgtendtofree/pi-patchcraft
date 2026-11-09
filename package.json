@@ -44,7 +44,6 @@
 		"test": "node --test",
 		"test:watch": "node --test --watch",
 		"test:coverage": "rm -rf coverage && mkdir -p coverage && node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-exclude=\"test/**/*.ts\" --test-coverage-lines=80 --test-coverage-functions=75 --test-coverage-branches=70 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info",
-		"smoke": "npm run smoke:package",
 		"smoke:package": "node scripts/smoke-package.mjs",
 		"package:check": "npm pack --dry-run",
 		"validate": "npm run quality && npm run typecheck && npm test",

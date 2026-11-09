@@ -287,22 +287,24 @@ async function assertNoNameAliasConflicts(changes: PlannedFileChange[]): Promise
 		touched.add(change.absoluteTargetPath);
 	}
 	const paths = [...touched];
+	const foldedAll = paths.map(foldAll);
 	const cache = new Map<string, NameLookupSensitivity>();
 	for (let left = 0; left < paths.length; left++) {
+		const ancestor = paths[left];
+		const foldedAncestorAll = foldedAll[left];
+		if (ancestor === undefined || foldedAncestorAll === undefined) continue;
 		for (let right = 0; right < paths.length; right++) {
 			if (left === right) continue;
-			const ancestor = paths[left];
 			const descendant = paths[right];
-			if (ancestor === undefined || descendant === undefined) continue;
+			const foldedDescendantAll = foldedAll[right];
+			if (descendant === undefined || foldedDescendantAll === undefined) continue;
 			if (isAncestorPath(ancestor, descendant)) {
 				throw new Error(`Patch contains conflicting operations for ${descendant}`);
 			}
 			// Cheap candidate filter before any filesystem probe: only a pair that could be one file, or a
 			// parent/child, under either axis needs a probe. An ordinary multi-file Add or Move never
 			// lists a directory, so execute-only parents still accept normal patches.
-			const foldedAllAncestor = foldAll(ancestor);
-			const foldedAllDescendant = foldAll(descendant);
-			if (foldedAllAncestor !== foldedAllDescendant && !isAncestorPath(foldedAllAncestor, foldedAllDescendant)) {
+			if (foldedAncestorAll !== foldedDescendantAll && !isAncestorPath(foldedAncestorAll, foldedDescendantAll)) {
 				continue;
 			}
 			const directory = await existingDirectoryFor(path.dirname(ancestor));

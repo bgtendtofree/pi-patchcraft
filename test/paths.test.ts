@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
-import { resolvePatchPath } from "../src/paths.ts";
+import { resolvePatchPathDetailed } from "../src/paths.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -14,11 +14,15 @@ async function workspace(): Promise<string> {
 	return directory;
 }
 
+async function resolvePatchPath(cwd: string, input: string): Promise<string> {
+	return (await resolvePatchPathDetailed(cwd, input)).absolute;
+}
+
 afterEach(async () => {
 	await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-describe("resolvePatchPath", () => {
+describe("resolvePatchPathDetailed", () => {
 	it("resolves a relative path through its real parent", async () => {
 		const cwd = await workspace();
 		assert.equal(await resolvePatchPath(cwd, "nested/new.txt"), path.join(await realpath(cwd), "nested/new.txt"));

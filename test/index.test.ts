@@ -193,7 +193,10 @@ describe("pi-patchcraft extension", () => {
 			false,
 		);
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
-		await assert.rejects(tool.execute("empty", { patch: "" }, undefined, undefined, { cwd }), /patch is required/);
+		await assert.rejects(
+			tool.execute("empty", { patch: "" }, undefined, undefined, { cwd }),
+			/expected \*\*\* Begin Patch/,
+		);
 		await assert.rejects(tool.execute("invalid", { patch: "invalid" }, undefined, undefined, { cwd }));
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
 	});
@@ -213,8 +216,8 @@ describe("pi-patchcraft extension", () => {
 			ok: false,
 			errors: [{ path: "/patch", keyword: "required", message: "missing" }],
 		});
-		// Coercion turns a scalar into a string before `execute()`. `execute()` keeps guarding the
-		// content: a coerced value such as "1" is not a patch and the parser rejects it.
+		// Coercion turns a scalar into a string before `execute()`, so `{ patch: 1 }` reaches the
+		// parser as "1" and is rejected there as a malformed envelope.
 		assert.deepEqual(validator.parse({ patch: 1 }), { ok: true, value: { patch: "1" } });
 	});
 

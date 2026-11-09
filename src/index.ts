@@ -31,7 +31,8 @@ interface PatchcraftModeState {
 }
 
 interface PatchcraftRenderState {
-	callKey?: string;
+	callPatch?: string;
+	callOptions?: string;
 	callText?: string;
 	callTheme?: RenderTheme;
 	callComponent?: Text;
@@ -145,9 +146,10 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		renderCall(args, theme, context) {
 			const state = context.state as PatchcraftRenderState;
 			const patch = typeof args?.patch === "string" ? args.patch : "";
-			const key = `${context.expanded}:${context.argsComplete}:${patch.length}:${patch.charCodeAt(patch.length - 1)}`;
-			if (state.callKey !== key || state.callTheme !== theme) {
-				state.callKey = key;
+			const options = `${context.expanded}:${context.argsComplete}`;
+			if (state.callPatch !== patch || state.callOptions !== options || state.callTheme !== theme) {
+				state.callPatch = patch;
+				state.callOptions = options;
 				state.callText = formatPatchCall(scanPatchPreview(patch), theme, {
 					expanded: context.expanded,
 					argsComplete: context.argsComplete,
@@ -187,7 +189,6 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		// to the JSON-schema function tool on providers without grammar constrained sampling.
 		constrainedSampling: { type: "grammar", variants: { openai_lark: APPLY_PATCH_LARK_GRAMMAR } },
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			if (!params.patch) throw new Error("patch is required");
 			onUpdate?.({
 				content: [{ type: "text", text: "Validating patch…" }],
 				details: undefined,

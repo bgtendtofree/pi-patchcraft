@@ -177,7 +177,3 @@ export async function resolvePatchPathDetailed(cwd: string, input: string): Prom
 		}
 	}
 }
-
-export async function resolvePatchPath(cwd: string, input: string): Promise<string> {
-	return (await resolvePatchPathDetailed(cwd, input)).absolute;
-}
