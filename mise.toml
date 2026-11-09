@@ -1,7 +1,6 @@
 [tools]
 node = "24.22.2"
 
-# >>> pi-ci-standard managed — regenerate with: pi-ci init >>>
 [tasks.check]
 description = "Iterative checks (npm run validate)"
 run = "npm run validate"
@@ -12,4 +11,3 @@ run = '''
 npm ci
 npm run ci
 '''
-# <<< pi-ci-standard managed <<<

@@ -1,4 +1,3 @@
-# Managed by pi-ci-standard — regenerate with: pi-ci init
 name: CI
 
 on:
