@@ -103,6 +103,20 @@ Patch-level rollback handles ordinary runtime failures. It is not a crash-safe f
 
 ## Install
 
+Install the matching Rust CLI first. From a checkout of this repository:
+
+```bash
+cargo install --locked --path rust/patchcraft-core
+patchcraft-core doctor --json
+```
+
+Put `patchcraft-core` on `PATH`, or set `PATCHCRAFT_BIN` to its absolute
+path before launching Pi. The extension and CLI must speak the same protocol
+(currently `2`). The Pi package does not ship a binary or fall back to a
+TypeScript implementation. Rust is only needed to build the executable.
+
+Then install the Pi extension:
+
 ```bash
 pi install git:github.com/bgtendtofree/pi-patchcraft
 ```
@@ -140,7 +154,8 @@ Patch execution and returned `content`, `details`, and `structuredContent` are u
 
 ## Development
 
-Runtime contract is Node.js `>=24`. Project mise config pins local development and CI to Node 24.22.2 with Pi 1.5.0.
+Runtime requires Node.js `>=24` and the matching Rust executable. The project
+uses Node.js 24.22.2, Pi 1.5.0, and stable Rust for local development and CI.
 
 ```bash
 mise install
@@ -151,15 +166,25 @@ npm test
 npm run test:coverage
 npm run package:check
 npm run smoke:package
-npm run ci
+mise run ci
 ```
 
 Load local source:
 
 ```bash
 npm run smoke:package
-pi -e ./src/index.ts
+PATCHCRAFT_BIN="$PWD/target/debug/patchcraft-core" pi -e ./src/index.ts
 ```
+
+### Core and Pi adapter
+
+[`rust/patchcraft-core`](rust/patchcraft-core/README.md) owns parsing, matching,
+path resolution, planning, writes, and rollback. Pi holds its native file
+queues from commit authorization through the core's exit, including rollback.
+TypeScript only registers the tool, drives the session, and formats the
+streaming preview and final diff. Run `mise run rust:check` for core tests
+and `mise run ci` for the full gate, including the packed extension with the
+real CLI.
 
 ## Current compatibility
 
@@ -195,4 +220,5 @@ This changes tool selection, not filesystem permissions: `apply_patch` can still
 
 ## License
 
-MIT
+MIT, except for the Codex-derived Rust files identified in
+[`rust/patchcraft-core`](rust/patchcraft-core/README.md), which are Apache-2.0.

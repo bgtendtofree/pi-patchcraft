@@ -1,13 +1,26 @@
 [tools]
 node = "24.22.2"
+rust = "stable"
+
+[tasks."rust:check"]
+description = "Check the Rust core"
+run = '''
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
+'''
 
 [tasks.check]
-description = "Iterative checks (npm run validate)"
-run = "npm run validate"
+description = "Iterative checks (npm run validate plus Rust checks)"
+run = '''
+npm run validate
+mise run rust:check
+'''
 
 [tasks.ci]
 description = "Full CI gate: fresh install, then npm run ci"
 run = '''
 npm ci
 npm run ci
+mise run rust:check
 '''

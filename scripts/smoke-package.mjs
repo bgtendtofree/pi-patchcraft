@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempDisposableSync, readFileSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { testCore } from "./test-core.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -41,13 +42,20 @@ if (!existsSync(installedPackage)) throw new Error(`Packed package was not insta
 // --list-models exits before Pi reports runtime extension errors.
 const smoke = `
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 const result = await discoverAndLoadExtensions([process.argv[1]], process.cwd(), "./agent");
 assert.deepEqual(result.errors, []);
 assert.equal(result.extensions.length, ${manifest.pi.extensions.length});
+const tool = result.extensions[0].tools.get("apply_patch")?.definition;
+assert.ok(tool);
+const patch = "*** Begin Patch\\n*** Add File: installed-core-smoke.txt\\n+works\\n*** End Patch";
+const applied = await tool.execute("smoke", { patch }, undefined, undefined, { cwd: process.cwd() });
+assert.equal(applied.structuredContent.added, 1);
+assert.equal(await readFile("installed-core-smoke.txt", "utf8"), "works\\n");
 `;
 run(process.execPath, ["--input-type=module", "-e", smoke, installedPackage], hostDirectory);
-console.log(`Packed runtime smoke passed: ${manifest.name} with Pi ${PI_VERSION} on Node ${process.versions.node}`);
+console.log(`Packed runtime smoke passed: ${manifest.name} with Pi ${PI_VERSION} and ${testCore}`);
 
 function run(command, args, cwd, capture = false) {
 	const output = execFileSync(command, args, {

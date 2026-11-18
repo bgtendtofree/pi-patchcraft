@@ -1,0 +1,3 @@
+[workspace]
+members = ["rust/patchcraft-core"]
+resolver = "3"

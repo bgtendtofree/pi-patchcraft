@@ -5,7 +5,7 @@
  * Capable models write the patch as raw text instead of a JSON-escaped string; Pi falls back to the
  * JSON-schema function tool on providers without grammar constrained sampling.
  *
- * The grammar must keep matching the patch language `parser.ts` accepts. It requires exactly one
+ * The grammar should produce patches accepted by the Rust parser. It requires exactly one
  * required string property in the tool parameters (here `patch`), or Pi rejects every request.
  */
 export const APPLY_PATCH_LARK_GRAMMAR = `start: begin_patch hunk+ end_patch

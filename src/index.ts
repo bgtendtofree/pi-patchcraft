@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { applyPatchPlan, planPatch } from "./apply.ts";
+import { planPatch } from "./client.ts";
 import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
 import { scanPatchPreview } from "./preview.ts";
 import {
@@ -13,7 +13,7 @@ import {
 	type RenderTheme,
 } from "./render.ts";
 import { isPatchcraftModel, reconcileActiveTools } from "./tools.ts";
-import { type PatchPlan, type PatchResultDetails, patchResultSchema } from "./types.ts";
+import { type PatchResultDetails, patchResultSchema } from "./types.ts";
 
 const patchParameters = Type.Object({
 	patch: Type.String({
@@ -36,23 +36,6 @@ interface PatchcraftRenderState {
 	callText?: string;
 	callTheme?: RenderTheme;
 	callComponent?: Text;
-}
-
-function resultDetails(plan: PatchPlan): PatchResultDetails {
-	return {
-		changes: plan.changes.map(({ operation, path, targetPath, displayDiff, added, removed, fuzz }) => ({
-			operation,
-			path,
-			targetPath,
-			displayDiff,
-			added,
-			removed,
-			fuzz,
-		})),
-		added: plan.added,
-		removed: plan.removed,
-		fuzz: plan.fuzz,
-	};
 }
 
 export default function piPatchcraft(pi: ExtensionAPI): void {
@@ -194,12 +177,17 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 				details: undefined,
 			});
 			const plan = await planPatch(ctx.cwd, params.patch, signal);
-			onUpdate?.({
-				content: [{ type: "text", text: `Applying patch to ${plan.changes.length} file(s)…` }],
-				details: undefined,
-			});
-			await applyPatchPlan(plan, signal);
-			const details = resultDetails(plan);
+			try {
+				onUpdate?.({
+					content: [{ type: "text", text: `Applying patch to ${plan.changes.length} file(s)…` }],
+					details: undefined,
+				});
+				await plan.apply(signal);
+			} finally {
+				await plan.close();
+			}
+			const { changes, added, removed, fuzz } = plan;
+			const details = { changes, added, removed, fuzz };
 			return {
 				content: [
 					{

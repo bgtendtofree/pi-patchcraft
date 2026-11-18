@@ -1,72 +1,14 @@
 import { Type } from "typebox";
 
-export type PatchOperation = AddOperation | DeleteOperation | UpdateOperation;
-
-export interface AddOperation {
-	type: "add";
-	path: string;
-	content: string;
-}
-
-export interface DeleteOperation {
-	type: "delete";
-	path: string;
-}
-
-export interface UpdateOperation {
-	type: "update";
-	path: string;
-	moveTo?: string;
-	chunks: PatchChunk[];
-}
-
-export interface PatchChunk {
-	contexts: string[];
-	oldLines: string[];
-	newLines: string[];
-	/** (old index, new index) pairs for lines parsed as context, so their terminators survive mixed endings. */
-	contextLineIndices: Array<[number, number]>;
-	endOfFile: boolean;
-}
-
-export interface PlannedFileChange {
+export type PatchResultChange = {
 	operation: "add" | "delete" | "update" | "move";
 	path: string;
 	targetPath: string;
-	absolutePath: string;
-	absoluteTargetPath: string;
-	/**
-	 * Submitted lexical spellings (`path.resolve(cwd, input)` before parent realpath). Pi keys its
-	 * mutation queue on the lexical path for a target that does not exist, so locking these spellings
-	 * shares the native queue instead of a canonical path Pi never uses for a missing file.
-	 */
-	lexicalPath: string;
-	lexicalTargetPath: string;
-	/** Conflict-check and mutation-lock identity. Case-folded on case-insensitive filesystems. */
-	identityPath: string;
-	identityTargetPath: string;
-	/** Submitted absolute symlink path followed during planning; revalidated before apply. */
-	sourceLinkPath?: string;
-	before: Buffer | undefined;
-	after: Buffer | undefined;
-	mode: number | undefined;
 	displayDiff: string;
 	added: number;
 	removed: number;
 	fuzz: number;
-}
-
-export interface PatchPlan {
-	changes: PlannedFileChange[];
-	added: number;
-	removed: number;
-	fuzz: number;
-}
-
-export type PatchResultChange = Pick<
-	PlannedFileChange,
-	"operation" | "path" | "targetPath" | "displayDiff" | "added" | "removed" | "fuzz"
->;
+};
 
 /**
  * Structurally identical to {@link patchResultSchema}, which Pi hands to codemode scripts as the
