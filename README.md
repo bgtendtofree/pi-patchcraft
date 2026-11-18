@@ -9,7 +9,7 @@ Patchcraft gives GPT models their familiar Codex patch language. It validates th
 - Codex `*** Begin Patch` / `*** End Patch` format
 - Add, update, delete, move, and rename-only operations
 - Multi-file patches in one tool call
-- Strict parser with actionable errors, including truncation and closest-match line hints
+- Codex runtime parser with errors for malformed patches and unmatched hunks
 - Relative, absolute, home-relative, and `file://` paths
 - Full preflight before the first write
 - Atomic per-file writes with mode preservation
@@ -76,6 +76,8 @@ Patchcraft defaults to automatic mode: `gpt-*` models receive `apply_patch` in p
 
 Mode changes persist in current session across reloads, resumes, and tree navigation. New sessions default to `auto`.
 
+Before enabling `apply_patch`, Patchcraft checks the core's protocol. If the core is missing or incompatible, your baseline editing tools stay available, even when `on` was requested. `/patchcraft` shows the reason. After fixing the install, reselect `auto` or `on`, or `/reload`.
+
 Before changing tools, Patchcraft saves the active-tool baseline as session metadata. Reloads, resumes, tree navigation, and forks restore it from the active branch. Only `edit` and `write` that were enabled in that baseline are restored; other tools retain their current enabled/disabled state. New sessions capture their own baseline.
 
 When the active branch has no valid baseline metadata, Patchcraft captures the current active tools. This also handles first-time loading and tree navigation before the metadata entry. If those tools were already replaced by Patchcraft, the original `edit`/`write` choices cannot be recovered reliably, so neither is guessed back on. Start a new session with the desired editing tools enabled to establish a fresh baseline.
@@ -101,21 +103,26 @@ Patchcraft intentionally fails instead of guessing:
 
 Mutation queues are process-local. Separate Pi sessions, shell commands, editors, and other processes do not honor them, so Patchcraft serializes only against concurrent Patchcraft and Pi file tools in the same process. Lock keys are sampled once at apply time; a symlink swapped after the final revalidation or a file created between that sample and the lock is not guaranteed to serialize, and a lexical spelling of a still-missing file other than the one Pi itself uses is not guaranteed to share its queue. This is best-effort same-process coordination, not a global filesystem lock.
 
-Patch-level rollback handles ordinary runtime failures. It is not a crash-safe filesystem transaction: process termination or machine failure during mutation can still leave partial state.
+Rollback also removes empty directories created by the patch; it never recursively removes a directory or its contents. This is not a crash-safe filesystem transaction: process termination or machine failure can leave partial state. If the core stops after commit without confirming the result, check the affected files before retrying.
 
 ## Install
 
-Install the matching Rust CLI first. From a checkout of this repository:
+Release tarballs bundle a matching core for macOS arm64 and Linux x64. These
+packages need no Rust toolchain or install script. If published to npm, install
+the package with `pi install npm:@bgtendtofree/pi-patchcraft`. You can also
+extract the `.tgz` from a GitHub Release and run `pi install /absolute/path/to/package`.
+
+For a Git checkout or another platform, build the matching CLI from the same
+checkout:
 
 ```bash
 cargo install --locked --path rust/patchcraft-core
 patchcraft-core doctor --json
 ```
 
-Put `patchcraft-core` on `PATH`, or set `PATCHCRAFT_BIN` to its absolute
-path before launching Pi. The extension and CLI must speak the same protocol
-(currently `2`). The Pi package does not ship a binary or fall back to a
-TypeScript implementation. Rust is only needed to build the executable.
+The extension uses `PATCHCRAFT_BIN` if set to an absolute path, then its bundled
+core, then `patchcraft-core` on `PATH`. The extension and CLI must speak the
+same protocol (currently `4`). Git installs do not build the core automatically.
 
 Then install the Pi extension:
 
@@ -154,10 +161,12 @@ A single-file patch shows its full diff immediately, matching Pi's `edit`; a mul
 
 Patch execution and returned `content`, `details`, and `structuredContent` are unchanged, including per-file `displayDiff` and added/removed/fuzz counts.
 
+For an unambiguous single-line replacement in a large LF text file, Rust sends only the changed lines and nearby context instead of two full snapshots. Other changes still use Pi's full diff.
+
 ## Development
 
 Runtime requires Node.js `>=24` and the matching Rust executable. The project
-uses Node.js 24.22.2, Pi 1.5.0, and stable Rust for local development and CI.
+uses Node.js 24.22.2, Pi 1.5.2, and stable Rust for local development and CI.
 
 ```bash
 mise install
@@ -174,7 +183,7 @@ mise run ci
 Load local source:
 
 ```bash
-npm run smoke:package
+npm run build:core
 PATCHCRAFT_BIN="$PWD/target/debug/patchcraft-core" pi -e ./src/index.ts
 ```
 
@@ -188,16 +197,20 @@ streaming preview and final diff. Run `mise run rust:check` for core tests
 and `mise run ci` for the full gate, including the packed extension with the
 real CLI.
 
+To measure a one-line update in a 16 MiB file on macOS or Linux, build with
+`cargo build --locked --release` and run `bash scripts/benchmark-core.sh`.
+The script measures the standalone core and the Pi adapter separately.
+
 ## Current compatibility
 
 Development and package smoke tests pin:
 
 - Node.js 24.22.2 through mise
 - npm locked dependencies
-- Pi 1.5.0
+- Pi 1.5.2
 - TypeScript 7
 
-Pi 1.5.0 is the development baseline; runtime dependencies remain `"*"` peer dependencies. Grammar sampling, structured results, file mutation queues, and codemode prompt guidelines are unchanged.
+Pi 1.5.2 is the development baseline; runtime dependencies remain `"*"` peer dependencies. Grammar sampling, structured results, file mutation queues, and codemode prompt guidelines are unchanged.
 
 Relevant Pi 1.3–1.5 changes:
 

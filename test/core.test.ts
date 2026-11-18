@@ -1,25 +1,27 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempDisposableSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempDisposableSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { it } from "node:test";
+import { generateDiffString } from "@earendil-works/pi-coding-agent";
 import { planPatch } from "../src/client.ts";
 
 const patch = "*** Begin Patch\n*** Add File: fresh.txt\n+hello\n*** End Patch";
 const binary = process.env.PATCHCRAFT_BIN ?? "patchcraft-core";
+const protocol = 4;
 
 it("reports compatibility and applies a patch as a standalone CLI", () => {
 	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
 	const doctor = spawnSync(binary, ["doctor", "--json"], { encoding: "utf8" });
 	assert.equal(doctor.status, 0, doctor.stderr);
 	assert.deepEqual(Object.keys(JSON.parse(doctor.stdout)).sort(), ["protocol", "version"]);
-	assert.equal(JSON.parse(doctor.stdout).protocol, 2);
+	assert.equal(JSON.parse(doctor.stdout).protocol, protocol);
 	const result = spawnSync(binary, ["apply", "--json"], { cwd: cwd.path, input: patch, encoding: "utf8" });
 	assert.equal(result.status, 0, result.stderr || result.stdout);
 	assert.deepEqual(JSON.parse(result.stdout), {
-		protocol: 2,
+		protocol,
 		status: "applied",
 		changes: [{ operation: "add", path: "fresh.txt", targetPath: "fresh.txt", fuzz: 0 }],
 	});
@@ -30,12 +32,72 @@ it("rejects incompatible session protocols without writing", () => {
 	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
 	const result = spawnSync(binary, ["session", "--json"], {
 		cwd: cwd.path,
-		input: `${JSON.stringify({ protocol: 1, patch })}\ncommit\n`,
+		input: `${JSON.stringify({ protocol: 3, cwd: cwd.path, patch })}\ncommit\n`,
 		encoding: "utf8",
 	});
 	assert.equal(result.status, 1);
-	assert.match(result.stdout, /Unsupported protocol 1/);
+	assert.match(result.stdout, /Unsupported protocol 3/);
 	assert.equal(existsSync(path.join(cwd.path, "fresh.txt")), false);
+});
+
+it("rejects a session cwd that does not identify the process workspace", () => {
+	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
+	const result = spawnSync(binary, ["session", "--json"], {
+		cwd: cwd.path,
+		input: `${JSON.stringify({ protocol, cwd: path.dirname(cwd.path), patch })}\ncommit\n`,
+		encoding: "utf8",
+	});
+	assert.equal(result.status, 1);
+	assert.match(result.stdout, /Session cwd does not identify the core working directory/);
+	assert.equal(existsSync(path.join(cwd.path, "fresh.txt")), false);
+});
+
+it("uses compact frames only for unambiguous large single-line updates and matches Pi's full diff", async () => {
+	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
+	const file = path.join(cwd.path, "source.txt");
+	const replacement = "*** Begin Patch\n*** Update File: source.txt\n-before\n+after\n*** End Patch";
+	const filler = `${"context ".repeat(14)}\n`.repeat(5_000);
+	const cases = [
+		{ name: "first line", before: `before\n${filler}${filler}`, compact: true },
+		{ name: "fuzzy middle line", before: `${filler}before  \n${filler}`, compact: true, fuzz: 1 },
+		{ name: "last line", before: `${filler}${filler}before\n`, compact: true },
+		{ name: "repeat", before: `${filler}before\nafter\n${filler}`, compact: false },
+		{ name: "mixed endings", before: `${filler}before\r\n${filler}`, compact: false },
+		{ name: "missing final LF", before: `${filler}${filler}before`, compact: false },
+		{ name: "oversized context", before: `before\n${"x".repeat(17_000)}\n${filler}${filler}`, compact: false },
+		{ name: "small file", before: "before\n", compact: false },
+	];
+
+	for (const { name, before, compact, fuzz = 0 } of cases) {
+		writeFileSync(file, before);
+		const child = spawn(binary, ["session", "--json"], { cwd: cwd.path, stdio: ["pipe", "pipe", "inherit"] });
+		const exit = new Promise<number | null>((resolve, reject) => {
+			child.once("error", reject);
+			child.once("close", resolve);
+		});
+		child.stdin.write(`${JSON.stringify({ protocol, cwd: cwd.path, patch: replacement })}\n`);
+		let changeFrame: string | undefined;
+		for await (const line of createInterface({ input: child.stdout })) {
+			const frame = JSON.parse(line);
+			if (frame.status === "change") changeFrame = line;
+			if (frame.status === "planned") child.stdin.end();
+		}
+		assert.equal(await exit, 1, name);
+		assert.ok(changeFrame, name);
+		const frame = JSON.parse(changeFrame);
+		assert.equal("window" in frame, compact, name);
+		assert.equal("before" in frame && "after" in frame, !compact, name);
+		if (compact) assert.ok(Buffer.byteLength(changeFrame) < 2048, name);
+		assert.ok(readFileSync(file, "utf8") === before, `${name}: planning did not write`);
+
+		const plan = await planPatch(cwd.path, replacement);
+		await plan.apply();
+		const after = readFileSync(file, "utf8");
+		const expected = before.replace(/before *\r?/, "after") + (before.endsWith("\n") ? "" : "\n");
+		assert.ok(after === expected, `${name}: expected file bytes`);
+		assert.equal(plan.changes[0]?.displayDiff, generateDiffString(before, after).diff, name);
+		assert.deepEqual([plan.added, plan.removed, plan.fuzz], [1, 1, fuzz], name);
+	}
 });
 
 it("uses the Codex runtime parser for leniencies and empty hunks", async () => {
@@ -69,6 +131,52 @@ it("rejects remote routing and invalid path data before a local mutation", async
 	assert.equal(existsSync(path.join(cwd.path, "fresh.txt")), false);
 });
 
+it("rejects a move to the same file even if its content would change", async () => {
+	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
+	const file = path.join(cwd.path, "fresh.txt");
+	writeFileSync(file, "before\n");
+	await assert.rejects(
+		planPatch(
+			cwd.path,
+			"*** Begin Patch\n*** Update File: fresh.txt\n*** Move to: ./fresh.txt\n-before\n+after\n*** End Patch",
+		),
+		/Move target already exists/,
+	);
+	assert.equal(readFileSync(file, "utf8"), "before\n");
+});
+
+it("reports an unknown outcome if the core exits without acknowledging commit", {
+	skip: process.platform === "win32",
+}, async () => {
+	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
+	const fake = path.join(cwd.path, "fake-core");
+	const file = path.join(cwd.path, "fresh.txt");
+	writeFileSync(
+		fake,
+		`#!/bin/sh
+read -r request
+printf '%s\\n' '{"status":"change","change":{"operation":"add","path":"fresh.txt","targetPath":"fresh.txt","fuzz":0},"before":"","after":"aGVsbG8K"}'
+printf '%s\\n' '${JSON.stringify({ protocol, status: "planned", lockPaths: [file] })}'
+if read -r command && [ "$command" = commit ]; then
+  printf 'hello\\n' > fresh.txt
+fi
+exit 1
+`,
+		{ mode: 0o755 },
+	);
+	const saved = process.env.PATCHCRAFT_BIN;
+	process.env.PATCHCRAFT_BIN = fake;
+	try {
+		const plan = await planPatch(cwd.path, patch);
+		await assert.rejects(plan.apply(), /commit outcome is unknown.*Check the affected files before retrying/);
+		await assert.rejects(plan.apply(), /no longer available/);
+		assert.equal(readFileSync(file, "utf8"), "hello\n");
+	} finally {
+		if (saved === undefined) delete process.env.PATCHCRAFT_BIN;
+		else process.env.PATCHCRAFT_BIN = saved;
+	}
+});
+
 it("EOF discards a plan when the host has not authorized commit", async () => {
 	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
 	const child = spawn(binary, ["session", "--json"], { cwd: cwd.path, stdio: ["pipe", "pipe", "inherit"] });
@@ -79,7 +187,7 @@ it("EOF discards a plan when the host has not authorized commit", async () => {
 	let planned = false;
 	let error = "";
 	try {
-		child.stdin.write(`${JSON.stringify({ protocol: 2, patch })}\n`);
+		child.stdin.write(`${JSON.stringify({ protocol, cwd: cwd.path, patch })}\n`);
 		for await (const line of createInterface({ input: child.stdout })) {
 			const frame = JSON.parse(line);
 			if (frame.status === "planned") {
@@ -103,7 +211,7 @@ it("fails clearly rather than falling back when the core executable is missing",
 	const saved = process.env.PATCHCRAFT_BIN;
 	process.env.PATCHCRAFT_BIN = path.join(cwd.path, "not-installed");
 	try {
-		await assert.rejects(planPatch(cwd.path, patch), /Install patchcraft-core on PATH or set PATCHCRAFT_BIN/);
+		await assert.rejects(planPatch(cwd.path, patch), /put patchcraft-core on PATH \(or set PATCHCRAFT_BIN\)/);
 	} finally {
 		if (saved === undefined) delete process.env.PATCHCRAFT_BIN;
 		else process.env.PATCHCRAFT_BIN = saved;

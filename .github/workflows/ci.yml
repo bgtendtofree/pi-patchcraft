@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -14,7 +15,15 @@ concurrency:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: macos-latest
+            platform: darwin-arm64
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -25,3 +34,11 @@ jobs:
 
       - name: Run CI gate
         run: mise run ci
+
+      - name: Save verified core for the tagged release
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: core-${{ matrix.platform }}
+          path: bin/${{ matrix.platform }}/patchcraft-core
+          if-no-files-found: error

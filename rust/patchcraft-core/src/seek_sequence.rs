@@ -29,7 +29,7 @@ pub(super) struct Match {
 /// Search in Codex's order: exact, trailing-space, surrounding-space, then
 /// punctuation-normalized. Only the comparison budget and fuzz score are local.
 pub(super) fn seek_sequence(
-    lines: &[String],
+    lines: &[&str],
     pattern: &[String],
     start: usize,
     eof: bool,
@@ -96,12 +96,7 @@ fn normalise(s: &str) -> String {
 mod tests {
     use super::{Budget, seek_sequence as search};
 
-    fn seek_sequence(
-        lines: &[String],
-        pattern: &[String],
-        start: usize,
-        eof: bool,
-    ) -> Option<usize> {
+    fn seek_sequence(lines: &[&str], pattern: &[String], start: usize, eof: bool) -> Option<usize> {
         search(lines, pattern, start, eof, &mut Budget::default())
             .unwrap()
             .map(|found| found.index)
@@ -114,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_exact_match_finds_sequence() {
-        let lines = to_vec(&["foo", "bar", "baz"]);
+        let lines = ["foo", "bar", "baz"];
         let pattern = to_vec(&["bar", "baz"]);
         assert_eq!(
             seek_sequence(&lines, &pattern, /*start*/ 0, /*eof*/ false,),
@@ -124,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_rstrip_match_ignores_trailing_whitespace() {
-        let lines = to_vec(&["foo   ", "bar\t\t"]);
+        let lines = ["foo   ", "bar\t\t"];
         // Pattern omits trailing whitespace.
         let pattern = to_vec(&["foo", "bar"]);
         assert_eq!(
@@ -135,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_trim_match_ignores_leading_and_trailing_whitespace() {
-        let lines = to_vec(&["    foo   ", "   bar\t"]);
+        let lines = ["    foo   ", "   bar\t"];
         // Pattern omits any additional whitespace.
         let pattern = to_vec(&["foo", "bar"]);
         assert_eq!(
@@ -146,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_pattern_longer_than_input_returns_none() {
-        let lines = to_vec(&["just one line"]);
+        let lines = ["just one line"];
         let pattern = to_vec(&["too", "many", "lines"]);
         // Should not panic – must return None when pattern cannot possibly fit.
         assert_eq!(

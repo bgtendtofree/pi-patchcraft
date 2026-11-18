@@ -1,12 +1,21 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { generateDiffString, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { PatchResultChange, PatchResultDetails } from "./types.ts";
 
-const protocol = 2;
+const protocol = 4;
+const executable = process.platform === "win32" ? "patchcraft-core.exe" : "patchcraft-core";
+const bundledCore = fileURLToPath(new URL(`../bin/${process.platform}-${process.arch}/${executable}`, import.meta.url));
+const coreHelp = "Install a matching Patchcraft package or put patchcraft-core on PATH (or set PATCHCRAFT_BIN).";
+const executeFile = promisify(execFile);
 // Two base64 snapshots of up to 64 MiB each, plus patch overhead.
 const maxFrameBytes = 192 * 1024 * 1024;
+
+class CoreRejection extends Error {}
 
 interface PatchPlan extends PatchResultDetails {
 	apply(signal?: AbortSignal): Promise<void>;
@@ -15,6 +24,28 @@ interface PatchPlan extends PatchResultDetails {
 
 function object(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function coreBinary(): string {
+	return process.env.PATCHCRAFT_BIN || (existsSync(bundledCore) ? bundledCore : executable);
+}
+
+export async function checkCore(binary: string, cwd: string): Promise<string | undefined> {
+	try {
+		const { stdout } = await executeFile(binary, ["doctor", "--json"], {
+			cwd,
+			timeout: 2000,
+			killSignal: "SIGKILL",
+			maxBuffer: 16 * 1024,
+			windowsHide: true,
+		});
+		const result: unknown = JSON.parse(stdout);
+		if (object(result) && result.protocol === protocol) return undefined;
+		return `Incompatible patchcraft-core protocol (expected ${protocol}). ${coreHelp}`;
+	} catch (error) {
+		const reason = object(error) && error.code === "ENOENT" ? "not found" : "doctor failed";
+		return `Cannot use ${binary}: ${reason}. ${coreHelp}`;
+	}
 }
 
 /** Read one frame at a time, without buffering the whole plan or splitting UTF-8 characters. */
@@ -42,9 +73,46 @@ async function* frames(stream: AsyncIterable<Buffer>) {
 	if (size) throw new Error("Incomplete patchcraft-core response");
 }
 
+function renderWindow(window: unknown): string {
+	if (!object(window)) throw new Error("Invalid patchcraft-core diff window");
+	const { line, totalLines, before, after, leading, trailing } = window;
+	const isLine = (value: unknown): value is string => typeof value === "string" && !/[\r\n]/.test(value);
+	if (
+		typeof line !== "number" ||
+		typeof totalLines !== "number" ||
+		!Number.isSafeInteger(line) ||
+		!Number.isSafeInteger(totalLines) ||
+		line < 1 ||
+		line > totalLines ||
+		!isLine(before) ||
+		!isLine(after) ||
+		!Array.isArray(leading) ||
+		!Array.isArray(trailing) ||
+		leading.length !== Math.min(4, line - 1) ||
+		trailing.length !== Math.min(4, totalLines - line) ||
+		!leading.every(isLine) ||
+		!trailing.every(isLine)
+	) {
+		throw new Error("Invalid patchcraft-core diff window");
+	}
+
+	// Match Pi's numbered display diff; renderDiff still handles the TUI.
+	const width = String(totalLines + 1).length; // Pi counts the trailing LF.
+	const row = (kind: string, number: number, text: string) => `${kind}${String(number).padStart(width)} ${text}`;
+	const gap = ` ${" ".repeat(width)} ...`;
+	return [
+		...(line - 1 > leading.length ? [gap] : []),
+		...leading.map((text, i) => row(" ", line - leading.length + i, text)),
+		row("-", line, before),
+		row("+", line, after),
+		...trailing.map((text, i) => row(" ", line + i + 1, text)),
+		...(totalLines - line > trailing.length ? [gap] : []),
+	].join("\n");
+}
+
 function renderChange(frame: Record<string, unknown>): PatchResultChange {
-	const { change, before, after } = frame;
-	if (!object(change) || typeof before !== "string" || typeof after !== "string") {
+	const { change, before, after, window } = frame;
+	if (!object(change)) {
 		throw new Error("Invalid patchcraft-core change frame");
 	}
 	const { operation, path, targetPath, fuzz } = change;
@@ -58,10 +126,17 @@ function renderChange(frame: Record<string, unknown>): PatchResultChange {
 	) {
 		throw new Error("Invalid patchcraft-core change");
 	}
-	const { diff: displayDiff } = generateDiffString(
-		Buffer.from(before, "base64").toString("utf8"),
-		Buffer.from(after, "base64").toString("utf8"),
-	);
+	let displayDiff: string;
+	if (window !== undefined) {
+		displayDiff = renderWindow(window);
+	} else if (typeof before === "string" && typeof after === "string") {
+		({ diff: displayDiff } = generateDiffString(
+			Buffer.from(before, "base64").toString("utf8"),
+			Buffer.from(after, "base64").toString("utf8"),
+		));
+	} else {
+		throw new Error("Invalid patchcraft-core change frame");
+	}
 	return {
 		operation,
 		path,
@@ -98,7 +173,7 @@ async function withPiQueues(paths: string[], signal: AbortSignal | undefined, co
 
 export async function planPatch(cwd: string, patch: string, signal?: AbortSignal): Promise<PatchPlan> {
 	signal?.throwIfAborted();
-	const binary = process.env.PATCHCRAFT_BIN || "patchcraft-core";
+	const binary = coreBinary();
 	const child = spawn(binary, ["session", "--json"], {
 		cwd,
 		stdio: ["pipe", "pipe", "pipe"],
@@ -122,13 +197,17 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 	});
 	const cancel = () => child.stdin.end();
 	const output = frames(child.stdout.iterator({ destroyOnReturn: false }));
-	let applied = false;
-	async function close() {
-		cancel();
-		// Drain stdout before waiting so a response in flight can't block exit.
-		await output.return(undefined).catch(() => {});
-		child.stdout.resume();
-		await exited;
+	let used = false;
+	let closing: Promise<void> | undefined;
+	function close(): Promise<void> {
+		closing ??= (async () => {
+			cancel();
+			// Drain stdout before waiting so a response in flight can't block exit.
+			await output.return(undefined).catch(() => {});
+			child.stdout.resume();
+			await exited;
+		})();
+		return closing;
 	}
 
 	async function next() {
@@ -136,7 +215,7 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 		if (done) {
 			const status = await exited;
 			if (spawnError && object(spawnError) && spawnError.code === "ENOENT") {
-				throw new Error(`Cannot start ${binary}. Install patchcraft-core on PATH or set PATCHCRAFT_BIN.`);
+				throw new Error(`Cannot start ${binary}. ${coreHelp}`);
 			}
 			throw new Error(
 				spawnError?.message ??
@@ -148,15 +227,15 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 				`Incompatible patchcraft-core protocol; expected ${protocol}. Install matching Pi and core releases.`,
 			);
 		}
-		if (value.status === "error") {
-			throw new Error(typeof value.message === "string" ? value.message : "patchcraft-core failed");
+		if (value.status === "error" && typeof value.message === "string") {
+			throw new CoreRejection(value.message);
 		}
 		return value;
 	}
 
 	try {
 		signal?.addEventListener("abort", cancel, { once: true });
-		child.stdin.write(`${JSON.stringify({ protocol, patch })}\n`);
+		child.stdin.write(`${JSON.stringify({ protocol, cwd: path.resolve(cwd), patch })}\n`);
 		const changes: PatchResultChange[] = [];
 		let response = await next();
 		while (response.status === "change") {
@@ -181,8 +260,8 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 			removed: changes.reduce((sum, change) => sum + change.removed, 0),
 			fuzz: changes.reduce((sum, change) => sum + change.fuzz, 0),
 			async apply(signal?: AbortSignal) {
-				if (applied) throw new Error("Patchcraft plan was already used");
-				applied = true;
+				if (used || closing) throw new Error("Patchcraft plan is no longer available");
+				used = true;
 				try {
 					signal?.addEventListener("abort", cancel, { once: true });
 					await withPiQueues(lockPaths, signal, async () => {
@@ -195,7 +274,11 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 						} catch (error) {
 							// Don't release Pi's locks until the core finishes any rollback.
 							await close();
-							throw error;
+							if (error instanceof CoreRejection && (await exited).code === 1) throw error;
+							const reason = error instanceof Error ? error.message : String(error);
+							throw new Error(`Patch commit outcome is unknown. Check the affected files before retrying. ${reason}`, {
+								cause: error,
+							});
 						}
 					});
 				} finally {

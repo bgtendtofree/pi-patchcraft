@@ -1,5 +1,5 @@
 use std::io::{self, BufRead, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, mpsc};
 
@@ -8,14 +8,17 @@ use patchcraft_core::{Cancelled, MAX_PATCH_BYTES, Plan};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-const PROTOCOL: u32 = 2;
-// A JSON string can use six wire bytes for one byte of ASCII.
-const MAX_REQUEST_BYTES: usize = 6 * MAX_PATCH_BYTES + 4096;
+mod diff_window;
+
+const PROTOCOL: u32 = 4;
+// Allow six wire bytes per input byte, plus space for a long workspace path.
+const MAX_REQUEST_BYTES: usize = 6 * (MAX_PATCH_BYTES + 32 * 1024);
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
     protocol: u32,
+    cwd: PathBuf,
     patch: String,
 }
 
@@ -27,7 +30,7 @@ fn send(value: &impl Serialize) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn session(cwd: &Path, cancelled: Arc<Cancelled>) -> Result<(), String> {
+fn session(cwd: &Path, cancelled: Arc<Cancelled>) -> Result<ExitCode, String> {
     let mut input = io::BufReader::new(io::stdin());
     let mut line = Vec::new();
     (&mut input)
@@ -43,6 +46,17 @@ fn session(cwd: &Path, cancelled: Arc<Cancelled>) -> Result<(), String> {
             "Unsupported protocol {}; expected {PROTOCOL}",
             request.protocol
         ));
+    }
+    // chdir/getcwd loses symlink spellings, which Pi uses to queue missing files.
+    if !request.cwd.is_absolute()
+        || dunce::canonicalize(&request.cwd).ok().as_deref()
+            != Some(
+                dunce::canonicalize(cwd)
+                    .map_err(|error| error.to_string())?
+                    .as_path(),
+            )
+    {
+        return Err("Session cwd does not identify the core working directory".into());
     }
     drop(line);
     let (accept, decision) = mpsc::sync_channel(1);
@@ -66,7 +80,7 @@ fn session(cwd: &Path, cancelled: Arc<Cancelled>) -> Result<(), String> {
         })
         .map_err(|error| error.to_string())?;
 
-    let plan = Plan::build_with_cancel(cwd, &request.patch, &cancelled)?;
+    let plan = Plan::build_with_cancel(&request.cwd, &request.patch, &cancelled)?;
     let mut lock_paths: Vec<_> = plan.lock_paths().into_iter().collect();
     lock_paths.sort_unstable();
     // Reject non-UTF-8 paths before publishing any plan for the Pi host.
@@ -78,19 +92,31 @@ fn session(cwd: &Path, cancelled: Arc<Cancelled>) -> Result<(), String> {
         })
         .collect::<Result<_, _>>()?;
     #[derive(Serialize)]
+    #[serde(untagged)]
+    enum DiffPayload<'a> {
+        Compact { window: diff_window::DiffWindow<'a> },
+        Snapshots { before: String, after: String },
+    }
+    #[derive(Serialize)]
     struct ChangeFrame<'a, T> {
         status: &'static str,
         change: &'a T,
-        before: String,
-        after: String,
+        #[serde(flatten)]
+        diff: DiffPayload<'a>,
     }
     for change in plan.changes() {
         let (before, after) = change.texts();
+        let diff = match diff_window::single_line_window(before, after) {
+            Some(window) => DiffPayload::Compact { window },
+            None => DiffPayload::Snapshots {
+                before: STANDARD.encode(before),
+                after: STANDARD.encode(after),
+            },
+        };
         send(&ChangeFrame {
             status: "change",
             change: change.summary(),
-            before: STANDARD.encode(before),
-            after: STANDARD.encode(after),
+            diff,
         })?;
     }
     send(&json!({ "protocol": PROTOCOL, "status": "planned", "lockPaths": lock_paths }))?;
@@ -98,7 +124,12 @@ fn session(cwd: &Path, cancelled: Arc<Cancelled>) -> Result<(), String> {
         return Err("Patch application aborted before commit".into());
     }
     plan.apply(&cancelled)?;
-    send(&json!({ "protocol": PROTOCOL, "status": "applied" }))
+    // A failure reporting success does not turn an applied patch into a rejection.
+    if let Err(error) = send(&json!({ "protocol": PROTOCOL, "status": "applied" })) {
+        eprintln!("patchcraft-core: Patch applied but could not report success: {error}");
+        return Ok(ExitCode::FAILURE);
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn standalone(cwd: &Path, cancelled: &Cancelled) -> Result<(), String> {
@@ -123,10 +154,11 @@ fn standalone(cwd: &Path, cancelled: &Cancelled) -> Result<(), String> {
     send(&json!({ "protocol": PROTOCOL, "status": "applied", "changes": result }))
 }
 
-fn run() -> Result<(), String> {
+fn run() -> Result<ExitCode, String> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args == ["doctor", "--json"] {
-        return send(&json!({ "protocol": PROTOCOL, "version": env!("CARGO_PKG_VERSION") }));
+        return send(&json!({ "protocol": PROTOCOL, "version": env!("CARGO_PKG_VERSION") }))
+            .map(|()| ExitCode::SUCCESS);
     }
     let standalone_mode = args == ["apply", "--json"];
     if !standalone_mode && args != ["session", "--json"] {
@@ -137,7 +169,7 @@ fn run() -> Result<(), String> {
     let signal = cancelled.clone();
     ctrlc::set_handler(move || signal.cancel()).map_err(|error| error.to_string())?;
     if standalone_mode {
-        standalone(&cwd, &cancelled)
+        standalone(&cwd, &cancelled).map(|()| ExitCode::SUCCESS)
     } else {
         session(&cwd, cancelled)
     }
@@ -145,7 +177,7 @@ fn run() -> Result<(), String> {
 
 fn main() -> ExitCode {
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(message) => {
             if let Err(error) =
                 send(&json!({ "protocol": PROTOCOL, "status": "error", "message": message }))

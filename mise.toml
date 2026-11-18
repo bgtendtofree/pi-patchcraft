@@ -21,6 +21,7 @@ mise run rust:check
 description = "Full CI gate: fresh install, then npm run ci"
 run = '''
 npm ci
+node scripts/check-codex.mjs
 npm run ci
 mise run rust:check
 '''

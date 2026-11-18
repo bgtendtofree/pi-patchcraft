@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, mkdtempDisposableSync, readFileSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { testCore } from "./test-core.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -42,8 +41,15 @@ if (!existsSync(installedPackage)) throw new Error(`Packed package was not insta
 // --list-models exits before Pi reports runtime extension errors.
 const smoke = `
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { join } from "node:path";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
+// Deliberately do not allow an external core (including the test override).
+delete process.env.PATCHCRAFT_BIN;
+process.env.PATH = "";
+const executable = process.platform === "win32" ? "patchcraft-core.exe" : "patchcraft-core";
+await access(join(process.argv[1], "bin", \`\${process.platform}-\${process.arch}\`, executable), constants.X_OK);
 const result = await discoverAndLoadExtensions([process.argv[1]], process.cwd(), "./agent");
 assert.deepEqual(result.errors, []);
 assert.equal(result.extensions.length, ${manifest.pi.extensions.length});
@@ -55,7 +61,7 @@ assert.equal(applied.structuredContent.added, 1);
 assert.equal(await readFile("installed-core-smoke.txt", "utf8"), "works\\n");
 `;
 run(process.execPath, ["--input-type=module", "-e", smoke, installedPackage], hostDirectory);
-console.log(`Packed runtime smoke passed: ${manifest.name} with Pi ${PI_VERSION} and ${testCore}`);
+console.log(`Packed runtime smoke passed: ${manifest.name} with Pi ${PI_VERSION} and its bundled core`);
 
 function run(command, args, cwd, capture = false) {
 	const output = execFileSync(command, args, {

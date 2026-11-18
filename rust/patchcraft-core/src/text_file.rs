@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Vendored from OpenAI Codex; see rust/patchcraft-core/README.md.
+// Adapted from OpenAI Codex; see rust/patchcraft-core/README.md.
 
 pub(super) type Replacement = (usize, usize, Vec<String>);
 
@@ -20,22 +20,22 @@ impl LineEnding {
     }
 }
 
-struct SourceLine {
-    text: String,
+struct SourceLine<'a> {
+    text: &'a str,
     ending: Option<LineEnding>,
 }
 
-pub(super) struct SourceFile {
-    lines: Vec<SourceLine>,
+pub(super) struct SourceFile<'a> {
+    lines: Vec<SourceLine<'a>>,
     preferred_ending: LineEnding,
 }
 
-impl SourceFile {
+impl<'a> SourceFile<'a> {
     /// Splits contents into logical lines while retaining each line ending.
     ///
     /// The first existing ending becomes the preferred style for inserted
     /// lines; files without an ending default to LF.
-    pub(super) fn parse(contents: &str) -> Self {
+    pub(super) fn parse(contents: &'a str) -> Self {
         let mut lines = Vec::new();
         let mut preferred_ending = None;
         let mut line_start = 0;
@@ -55,7 +55,7 @@ impl SourceFile {
             };
             preferred_ending.get_or_insert(ending);
             lines.push(SourceLine {
-                text: contents[line_start..cursor].to_string(),
+                text: &contents[line_start..cursor],
                 ending: Some(ending),
             });
             cursor += ending_len;
@@ -64,7 +64,7 @@ impl SourceFile {
 
         if line_start < contents.len() {
             lines.push(SourceLine {
-                text: contents[line_start..].to_string(),
+                text: &contents[line_start..],
                 ending: None,
             });
         }
@@ -75,8 +75,8 @@ impl SourceFile {
         }
     }
 
-    pub(super) fn line_texts(&self) -> Vec<String> {
-        self.lines.iter().map(|line| line.text.clone()).collect()
+    pub(super) fn line_texts(&self) -> Vec<&'a str> {
+        self.lines.iter().map(|line| line.text).collect()
     }
 
     /// Rebuilds the file from source-ordered, non-overlapping replacements.
@@ -84,7 +84,7 @@ impl SourceFile {
     /// Unchanged lines retain their original endings, inserted lines use the
     /// preferred ending, and every resulting line receives an ending to match
     /// apply-patch's historical trailing-newline behavior.
-    pub(super) fn apply_replacements(&mut self, replacements: &[Replacement]) {
+    pub(super) fn apply_replacements(&mut self, replacements: &'a [Replacement]) {
         let mut source_lines = std::mem::take(&mut self.lines).into_iter();
         let mut new_lines = Vec::new();
         let mut source_index = 0;
@@ -96,7 +96,7 @@ impl SourceFile {
             }
             for _ in source_lines.by_ref().take(*old_len) {}
             new_lines.extend(new_segment.iter().map(|text| SourceLine {
-                text: text.clone(),
+                text,
                 ending: Some(self.preferred_ending),
             }));
             source_index = start_idx + old_len;
@@ -114,7 +114,7 @@ impl SourceFile {
     pub(super) fn into_contents(self) -> String {
         let mut contents = String::new();
         for line in self.lines {
-            contents.push_str(&line.text);
+            contents.push_str(line.text);
             if let Some(ending) = line.ending {
                 contents.push_str(ending.as_str());
             }

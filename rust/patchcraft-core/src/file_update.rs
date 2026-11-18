@@ -29,7 +29,7 @@ pub(crate) fn apply_chunks(
 /// new lines, given the patch `chunks`. Each replacement is returned as
 /// `(start_index, old_len, new_lines)`.
 fn compute_replacements(
-    original_lines: &[String],
+    original_lines: &[&str],
     path: &str,
     chunks: &[UpdateFileChunk],
 ) -> Result<(Vec<Replacement>, u64), String> {

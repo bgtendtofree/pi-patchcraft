@@ -57,16 +57,19 @@ const temporaryDirectories: string[] = [];
 function extensionHarness(tools: string[], sessionManager = SessionManager.inMemory()) {
 	let tool: RegisteredTool | undefined;
 	let command: RegisteredCommand | undefined;
-	const handlers = new Map<string, (event: unknown, ctx: unknown) => void>();
+	const handlers = new Map<string, (event: unknown, ctx: unknown) => void | Promise<void>>();
+	const notifications: string[] = [];
 	const context = {
+		cwd: process.cwd(),
 		model: { id: "gpt-5", provider: "openai" },
 		sessionManager,
-		ui: { notify() {} },
+		ui: { notify: (message: string) => notifications.push(message) },
 	};
 	const harness = {
 		tools: [...tools],
 		switches: 0,
 		context,
+		notifications,
 		get tool() {
 			assert.ok(tool);
 			return tool;
@@ -77,7 +80,7 @@ function extensionHarness(tools: string[], sessionManager = SessionManager.inMem
 		},
 		emit(name: string, reason = "startup") {
 			assert.ok(handlers.has(name));
-			handlers.get(name)?.({ type: name, reason }, context);
+			return handlers.get(name)?.({ type: name, reason }, context);
 		},
 	};
 	piPatchcraft({
@@ -87,7 +90,7 @@ function extensionHarness(tools: string[], sessionManager = SessionManager.inMem
 		registerCommand(_name: string, value: RegisteredCommand) {
 			command = value;
 		},
-		on(name: string, handler: (event: unknown, ctx: unknown) => void) {
+		on(name: string, handler: (event: unknown, ctx: unknown) => void | Promise<void>) {
 			handlers.set(name, handler);
 		},
 		getActiveTools: () => [...harness.tools],
@@ -123,22 +126,22 @@ describe("pi-patchcraft extension", () => {
 			idempotentHint: false,
 			openWorldHint: false,
 		});
-		harness.emit("session_start");
+		await harness.emit("session_start");
 		assert.deepEqual(harness.tools, ["read", "bash", "apply_patch"]);
 		assert.equal(harness.switches, 1);
 		harness.context.model = { id: "openai/gpt-5.6-luna", provider: "openrouter" };
-		harness.emit("model_select");
+		await harness.emit("model_select");
 		harness.context.model = { id: "gpt-5", provider: "openai" };
-		harness.emit("before_agent_start");
+		await harness.emit("before_agent_start");
 		assert.deepEqual(harness.tools, ["read", "bash", "apply_patch"]);
 		assert.equal(harness.switches, 1);
 		harness.tools.splice(2, 0, "external_tool");
 		harness.context.model = { id: "claude-sonnet-4", provider: "anthropic" };
-		harness.emit("model_select");
+		await harness.emit("model_select");
 		assert.deepEqual(harness.tools, ["read", "edit", "write", "bash", "external_tool"]);
 		assert.equal(harness.switches, 2);
 		harness.context.model = { id: "codex-platform-model", provider: "custom" };
-		harness.emit("model_select");
+		await harness.emit("model_select");
 		assert.deepEqual(harness.tools, ["read", "edit", "write", "bash", "external_tool"]);
 		assert.equal(harness.switches, 2);
 
@@ -223,7 +226,7 @@ describe("pi-patchcraft extension", () => {
 
 	it("supports session-scoped automatic, forced-on, and forced-off modes", async () => {
 		let command: RegisteredCommand | undefined;
-		const handlers = new Map<string, (event: unknown, ctx: unknown) => void>();
+		const handlers = new Map<string, (event: unknown, ctx: unknown) => void | Promise<void>>();
 		const entries: Array<{ type: "custom"; customType: string; data: unknown }> = [];
 		const notifications: string[] = [];
 		let activeTools = ["read", "edit", "write", "bash"];
@@ -232,7 +235,7 @@ describe("pi-patchcraft extension", () => {
 			registerCommand(_name: string, value: RegisteredCommand) {
 				command = value;
 			},
-			on(name: string, handler: (event: unknown, ctx: unknown) => void) {
+			on(name: string, handler: (event: unknown, ctx: unknown) => void | Promise<void>) {
 				handlers.set(name, handler);
 			},
 			getActiveTools() {
@@ -246,13 +249,14 @@ describe("pi-patchcraft extension", () => {
 			},
 		} as unknown as ExtensionAPI;
 		const context = {
+			cwd: process.cwd(),
 			model: { id: "claude-sonnet-4", provider: "anthropic" },
 			sessionManager: { getBranch: () => entries },
 			ui: { notify: (message: string) => notifications.push(message) },
 		};
 
 		piPatchcraft(pi);
-		handlers.get("session_start")?.({}, context);
+		await handlers.get("session_start")?.({}, context);
 		assert.deepEqual(activeTools, ["read", "edit", "write", "bash"]);
 
 		await command?.handler("on", context);
@@ -269,8 +273,36 @@ describe("pi-patchcraft extension", () => {
 		assert.match(notifications.at(-1) ?? "", /Patchcraft mode: auto/);
 
 		entries.push({ type: "custom", customType: "patchcraft-mode", data: { mode: "off" } });
-		handlers.get("session_tree")?.({}, context);
+		await handlers.get("session_tree")?.({}, context);
 		assert.deepEqual(activeTools, ["read", "edit", "write", "bash"]);
+	});
+
+	it("keeps baseline editing available when the core is missing or incompatible", async () => {
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-doctor-"));
+		temporaryDirectories.push(cwd);
+		const saved = process.env.PATCHCRAFT_BIN;
+		assert.ok(saved);
+		const harness = extensionHarness(["read", "edit"]);
+		const missing = path.join(cwd, "missing");
+		try {
+			process.env.PATCHCRAFT_BIN = missing;
+			await harness.emit("session_start");
+			await harness.emit("before_agent_start");
+			assert.deepEqual(harness.tools, ["read", "edit"]);
+			assert.equal(harness.notifications.length, 1);
+			assert.match(harness.notifications[0] ?? "", /disabled.*not found/);
+			if (process.platform !== "win32") {
+				await writeFile(missing, `#!/bin/sh\nprintf '%s\\n' '{"protocol":3}'\n`, { mode: 0o755 });
+				await harness.mode("on");
+				assert.deepEqual(harness.tools, ["read", "edit"]);
+				assert.match(harness.notifications.at(-1) ?? "", /Incompatible patchcraft-core protocol/);
+			}
+			process.env.PATCHCRAFT_BIN = saved;
+			await harness.mode("auto");
+			assert.deepEqual(harness.tools, ["read", "apply_patch"]);
+		} finally {
+			process.env.PATCHCRAFT_BIN = saved;
+		}
 	});
 
 	it("persists baseline before replacement and restores it across reload and disk resume", async () => {
@@ -278,12 +310,12 @@ describe("pi-patchcraft extension", () => {
 		temporaryDirectories.push(cwd);
 		const session = SessionManager.create(cwd, cwd);
 		const original = extensionHarness(["read", "edit", "write", "bash", "external"], session);
-		original.emit("session_start");
+		await original.emit("session_start");
 		assert.deepEqual(original.tools, ["read", "bash", "external", "apply_patch"]);
 		session.appendMessage({ role: "user", content: "test", timestamp: Date.now() });
 
 		const reloaded = extensionHarness(original.tools, session);
-		reloaded.emit("session_start", "reload");
+		await reloaded.emit("session_start", "reload");
 		assert.deepEqual(reloaded.tools, original.tools);
 		assert.equal(session.getBranch().filter((entry) => entry.type === "custom").length, 1);
 		await reloaded.mode("on");
@@ -292,7 +324,7 @@ describe("pi-patchcraft extension", () => {
 		assert.ok(sessionFile);
 		const resumed = extensionHarness(["bash", "apply_patch", "new_external"], SessionManager.open(sessionFile, cwd));
 		resumed.context.model = { id: "claude-sonnet-4", provider: "anthropic" };
-		resumed.emit("session_start", "resume");
+		await resumed.emit("session_start", "resume");
 		assert.deepEqual(resumed.tools, ["bash", "new_external", "apply_patch"]);
 		await resumed.mode("off");
 		assert.deepEqual(resumed.tools, ["edit", "write", "bash", "new_external"]);
@@ -308,11 +340,11 @@ describe("pi-patchcraft extension", () => {
 		for (const editingTools of [[], ["edit"], ["write"]]) {
 			const baseline = ["read", ...editingTools, "bash"];
 			const initial = extensionHarness(baseline);
-			initial.emit("session_start");
+			await initial.emit("session_start");
 			const resumed = extensionHarness(initial.tools, initial.context.sessionManager);
-			resumed.emit("session_start", "resume");
+			await resumed.emit("session_start", "resume");
 			resumed.context.model = { id: "claude-sonnet-4", provider: "anthropic" };
-			resumed.emit("model_select");
+			await resumed.emit("model_select");
 			assert.deepEqual(resumed.tools, baseline);
 			await resumed.mode("on");
 			await resumed.mode("off");
@@ -323,28 +355,28 @@ describe("pi-patchcraft extension", () => {
 	it("preserves codemode and disabled write in a CLI-style adjusted baseline", async () => {
 		const baseline = ["read", "bash", "edit", "codemode"];
 		const initial = extensionHarness(baseline);
-		initial.emit("session_start");
+		await initial.emit("session_start");
 		assert.deepEqual(initial.tools, ["read", "bash", "codemode", "apply_patch"]);
 
 		const reloaded = extensionHarness(initial.tools, initial.context.sessionManager);
-		reloaded.emit("session_start", "reload");
+		await reloaded.emit("session_start", "reload");
 		assert.deepEqual(reloaded.tools, initial.tools);
 		await reloaded.mode("off");
 		assert.deepEqual(reloaded.tools, baseline);
 		await reloaded.mode("auto");
 		reloaded.context.model = { id: "claude-haiku-5-5", provider: "anthropic" };
-		reloaded.emit("model_select");
+		await reloaded.emit("model_select");
 		assert.deepEqual(reloaded.tools, baseline);
 	});
 
 	it("resets mode and baseline for a new session", async () => {
 		const harness = extensionHarness(["read", "edit", "bash"]);
-		harness.emit("session_start");
+		await harness.emit("session_start");
 		await harness.mode("on");
 		harness.context.sessionManager = SessionManager.inMemory();
 		harness.context.model = { id: "claude-sonnet-4", provider: "anthropic" };
 		harness.tools = ["read", "write", "bash", "other"];
-		harness.emit("session_start", "new");
+		await harness.emit("session_start", "new");
 		assert.deepEqual(harness.tools, ["read", "write", "bash", "other"]);
 		await harness.mode("on");
 		await harness.mode("off");
@@ -355,7 +387,7 @@ describe("pi-patchcraft extension", () => {
 		const session = SessionManager.inMemory();
 		const root = session.appendCustomEntry("test-root", {});
 		const first = extensionHarness(["read", "edit", "bash"], session);
-		first.emit("session_start");
+		await first.emit("session_start");
 		await first.mode("on");
 		const firstLeaf = session.getLeafId();
 		assert.ok(firstLeaf);
@@ -363,14 +395,14 @@ describe("pi-patchcraft extension", () => {
 		session.branch(root);
 		const sibling = extensionHarness(["read", "write", "bash"], session);
 		sibling.context.model = { id: "claude-sonnet-4", provider: "anthropic" };
-		sibling.emit("session_start");
+		await sibling.emit("session_start");
 		await sibling.mode("off");
 		const siblingLeaf = session.getLeafId();
 		assert.ok(siblingLeaf);
 
 		// Pi restores this branch's transcript loadout before emitting session_tree.
 		first.tools = ["read", "write", "bash", "external"];
-		first.emit("session_tree");
+		await first.emit("session_tree");
 		assert.deepEqual(first.tools, ["read", "write", "bash", "external"]);
 		await first.mode("on");
 		await first.mode("off");
@@ -378,12 +410,12 @@ describe("pi-patchcraft extension", () => {
 
 		session.branch(firstLeaf);
 		first.tools = ["read", "bash", "apply_patch", "external"];
-		first.emit("session_tree");
+		await first.emit("session_tree");
 		assert.deepEqual(first.tools, ["read", "bash", "external", "apply_patch"]);
 		session.createBranchedSession(firstLeaf);
 		const forked = extensionHarness(first.tools, session);
 		forked.context.model = { id: "claude-sonnet-4", provider: "anthropic" };
-		forked.emit("session_start", "fork");
+		await forked.emit("session_start", "fork");
 		assert.deepEqual(forked.tools, first.tools);
 		await forked.mode("off");
 		assert.deepEqual(forked.tools, ["read", "edit", "bash", "external"]);
@@ -396,14 +428,14 @@ describe("pi-patchcraft extension", () => {
 		}
 		session.appendCustomEntry("patchcraft-mode", { mode: "on" });
 		const legacy = extensionHarness(["read", "bash", "apply_patch", "external"], session);
-		legacy.emit("session_start", "resume");
+		await legacy.emit("session_start", "resume");
 		await legacy.mode("off");
 		assert.deepEqual(legacy.tools, ["read", "bash", "external"]);
 
 		// Navigating before metadata must not reuse the previous branch's in-memory baseline.
 		session.resetLeaf();
 		legacy.tools = ["read", "write", "bash"];
-		legacy.emit("session_tree");
+		await legacy.emit("session_tree");
 		await legacy.mode("off");
 		assert.deepEqual(legacy.tools, ["read", "write", "bash"]);
 	});
@@ -411,7 +443,7 @@ describe("pi-patchcraft extension", () => {
 	it("uses the selected virtual model id, with an explicit on override", async () => {
 		const harness = extensionHarness(["read", "edit", "write", "bash"]);
 		harness.context.model = { id: "auto", provider: "openai-codex" };
-		harness.emit("session_start");
+		await harness.emit("session_start");
 		assert.deepEqual(harness.tools, ["read", "edit", "write", "bash"]);
 		await harness.mode("on");
 		assert.deepEqual(harness.tools, ["read", "bash", "apply_patch"]);
@@ -430,7 +462,7 @@ describe("pi-patchcraft extension", () => {
 		temporaryDirectories.push(cwd);
 		await writeFile(path.join(cwd, "value.txt"), "before\n");
 		const harness = extensionHarness(["read", "edit", "bash"]);
-		harness.emit("session_start");
+		await harness.emit("session_start");
 		const { tool } = harness;
 		const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 		const patch = "*** Begin Patch\n*** Update File: value.txt\n@@\n-before\n+after\n*** End Patch";

@@ -134,10 +134,6 @@ fn read_file(path: &Path, metadata: &Metadata) -> Result<Vec<u8>> {
 }
 
 impl Plan {
-    pub fn build(cwd: &Path, patch: &str) -> Result<Self> {
-        Self::build_with_cancel(cwd, patch, &Cancelled::default())
-    }
-
     pub fn build_with_cancel(cwd: &Path, patch: &str, cancelled: &Cancelled) -> Result<Self> {
         cancelled.check()?;
         if patch.len() > MAX_PATCH_BYTES {
@@ -268,23 +264,31 @@ impl Plan {
     fn apply_with(self, cancelled: &Cancelled, hook: &mut Hook<'_>) -> Result<()> {
         self.validate(cancelled)?;
         let mut mutations = Vec::with_capacity(self.changes.len());
+        let mut directories = Vec::new();
         for change in &self.changes {
             let mut state = Mutation::default();
             let result = cancelled
                 .check()
-                .and_then(|()| apply_change(change, &mut state, hook))
+                .and_then(|()| apply_change(change, &mut state, &mut directories, hook))
                 .and_then(|()| cancelled.check());
             mutations.push((change, state));
             if let Err(error) = result {
-                let failures: Vec<_> = mutations
+                let mut failures: Vec<_> = mutations
                     .into_iter()
                     .rev()
                     .filter_map(|(change, state)| {
-                        rollback_change(change, state, hook)
+                        rollback_change(change, state, &mut directories, hook)
                             .err()
                             .map(|error| format!("{}: {error}", change.summary.target_path))
                     })
                     .collect();
+                for directory in directories.iter().rev() {
+                    if let Err(error) = fs::remove_dir(directory)
+                        && error.kind() != io::ErrorKind::NotFound
+                    {
+                        failures.push(io_error(directory, error));
+                    }
+                }
                 let suffix = if failures.is_empty() {
                     "All applied changes were rolled back.".into()
                 } else {
@@ -365,13 +369,11 @@ fn build_change(cwd: &Path, op: Hunk) -> Result<Change> {
     if let Some(move_to) = move_to {
         let requested = lexical_path(cwd, move_to)?;
         let resolved = resolve_parent(&requested)?;
-        if resolved != absolute {
-            if lstat(&resolved)?.is_some() {
-                return Err(format!("Move target already exists: {target_path}"));
-            }
-            target = resolved;
-            lexical_target = requested;
+        if lstat(&resolved)?.is_some() {
+            return Err(format!("Move target already exists: {target_path}"));
         }
+        target = resolved;
+        lexical_target = requested;
     }
     if matches!(kind, Kind::Update | Kind::Move) && target == source && after == before {
         return Err(format!("Update produced no changes: {path}"));
@@ -434,17 +436,37 @@ enum Step {
 }
 type Hook<'a> = dyn FnMut(Step, &Path) -> io::Result<()> + 'a;
 
+fn create_parents(directory: &Path, created: &mut Vec<PathBuf>) -> Result<()> {
+    let mut missing = Vec::new();
+    for path in directory.ancestors() {
+        match fs::metadata(path) {
+            Ok(_) => break, // create_dir or tempfile will diagnose a non-directory.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => missing.push(path),
+            Err(error) => return Err(io_error(path, error)),
+        }
+    }
+    for path in missing.into_iter().rev() {
+        match fs::create_dir(path) {
+            Ok(()) => created.push(path.to_owned()),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists && path.is_dir() => {}
+            Err(error) => return Err(io_error(path, error)),
+        }
+    }
+    Ok(())
+}
+
 fn atomic_write(
     path: &Path,
     bytes: &[u8],
     permissions: Option<&Permissions>,
     replace: bool,
+    directories: &mut Vec<PathBuf>,
     hook: &mut Hook<'_>,
 ) -> Result<()> {
     if replace {
         assert_replaceable(path).map_err(|error| io_error(path, error))?;
     }
-    fs::create_dir_all(parent(path)).map_err(|error| io_error(path, error))?;
+    create_parents(parent(path), directories)?;
     let mut builder = tempfile::Builder::new();
     builder.prefix(".patchcraft-").suffix(".tmp");
     #[cfg(unix)]
@@ -506,13 +528,19 @@ fn remove_if_present(path: &Path, hook: &mut Hook<'_>) -> Result<()> {
     }
 }
 
-fn apply_change(change: &Change, state: &mut Mutation, hook: &mut Hook<'_>) -> Result<()> {
+fn apply_change(
+    change: &Change,
+    state: &mut Mutation,
+    directories: &mut Vec<PathBuf>,
+    hook: &mut Hook<'_>,
+) -> Result<()> {
     if let Some(after) = &change.after {
         atomic_write(
             &change.target,
             after,
             change.permissions.as_ref(),
             !change.is_move() && change.before.is_some(),
+            directories,
             hook,
         )?;
         state.target_written = true;
@@ -524,7 +552,12 @@ fn apply_change(change: &Change, state: &mut Mutation, hook: &mut Hook<'_>) -> R
     hook(Step::Applied, &change.target).map_err(|error| io_error(&change.target, error))
 }
 
-fn rollback_change(change: &Change, state: Mutation, hook: &mut Hook<'_>) -> Result<()> {
+fn rollback_change(
+    change: &Change,
+    state: Mutation,
+    directories: &mut Vec<PathBuf>,
+    hook: &mut Hook<'_>,
+) -> Result<()> {
     if state.source_removed {
         // Restore first: if this fails, the move destination may be the only remaining copy.
         if let Some(before) = &change.before {
@@ -533,6 +566,7 @@ fn rollback_change(change: &Change, state: Mutation, hook: &mut Hook<'_>) -> Res
                 before,
                 change.permissions.as_ref(),
                 false,
+                directories,
                 hook,
             )?;
         }
@@ -546,6 +580,7 @@ fn rollback_change(change: &Change, state: Mutation, hook: &mut Hook<'_>) -> Res
                 before,
                 change.permissions.as_ref(),
                 true,
+                directories,
                 hook,
             )?;
         }
@@ -558,7 +593,12 @@ mod tests {
     use super::*;
 
     fn plan(cwd: &Path, body: &str) -> Plan {
-        Plan::build(cwd, &format!("*** Begin Patch\n{body}\n*** End Patch")).unwrap()
+        Plan::build_with_cancel(
+            cwd,
+            &format!("*** Begin Patch\n{body}\n*** End Patch"),
+            &Cancelled::default(),
+        )
+        .unwrap()
     }
 
     fn assert_clean(dir: &Path) {
@@ -620,6 +660,42 @@ mod tests {
         assert_eq!(fs::read(cwd.join("deleted")).unwrap(), b"keep\n");
         assert_eq!(fs::read(cwd.join("fail")).unwrap(), b"keep\n");
         assert_clean(cwd);
+    }
+
+    #[test]
+    fn rollback_removes_only_empty_directories_created_by_the_patch() {
+        for concurrent_file in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let cwd = dir.path();
+            fs::create_dir(cwd.join("keep")).unwrap();
+            let error = plan(
+                cwd,
+                "*** Add File: keep/new/nested/fresh\n+x\n*** Add File: fail/nested/file\n+x",
+            )
+            .apply_with(&Cancelled::default(), &mut |step, path| {
+                if step == Step::WriteTemp && path.ends_with("file") {
+                    if concurrent_file {
+                        fs::write(cwd.join("keep/new/concurrent"), "keep")?;
+                    }
+                    return Err(io::Error::other("write failed"));
+                }
+                Ok(())
+            })
+            .unwrap_err();
+            assert!(!cwd.join("fail").exists());
+            assert!(!cwd.join("keep/new/nested").exists());
+            assert!(cwd.join("keep").is_dir());
+            if concurrent_file {
+                assert!(error.contains("Rollback failed"));
+                assert_eq!(
+                    fs::read_to_string(cwd.join("keep/new/concurrent")).unwrap(),
+                    "keep"
+                );
+            } else {
+                assert!(error.contains("All applied changes were rolled back"));
+                assert!(!cwd.join("keep/new").exists());
+            }
+        }
     }
 
     #[test]

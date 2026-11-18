@@ -9,12 +9,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v4
-      - run: mise run ci
+    uses: ./.github/workflows/ci.yml
 
   release:
     needs: verify
@@ -23,8 +18,23 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: core-*
+          path: artifacts
+      - name: Pack both verified binaries with the extension
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+          for platform in linux-x64 darwin-arm64; do
+            mkdir -p "bin/$platform"
+            install -m 755 "artifacts/core-$platform/patchcraft-core" "bin/$platform/patchcraft-core"
+          done
+          npm pack
       - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+          files: '*.tgz'
+          fail_on_unmatched_files: true

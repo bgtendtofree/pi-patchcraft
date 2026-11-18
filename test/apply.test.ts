@@ -869,8 +869,12 @@ describe("patch planning and application", () => {
 		assert.deepEqual(await readdir(cwd), ["case-probe.txt"]);
 	});
 
-	it("shares Pi's mutation queue for a not-yet-existing file", async () => {
-		const cwd = await workspace();
+	it("shares Pi's mutation queue for a not-yet-existing file under a symlink cwd", async () => {
+		const root = await workspace();
+		const real = path.join(root, "real");
+		const cwd = path.join(root, "logical");
+		await mkdir(real);
+		await symlink(real, cwd, process.platform === "win32" ? "junction" : "dir");
 		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: Fresh.txt\n+value\n*** End Patch");
 		// Pi keys the native queue on the submitted lexical path when the target is missing, not the
 		// canonical parent-resolved path. Holding the same spelling must serialize Patchcraft behind it.

@@ -1,27 +1,5 @@
-import { Type } from "typebox";
+import { type Static, Type } from "typebox";
 
-export type PatchResultChange = {
-	operation: "add" | "delete" | "update" | "move";
-	path: string;
-	targetPath: string;
-	displayDiff: string;
-	added: number;
-	removed: number;
-	fuzz: number;
-};
-
-/**
- * Structurally identical to {@link patchResultSchema}, which Pi hands to codemode scripts as the
- * tool's `structuredContent`. A type alias, not an interface, so Pi's `JsonValue` accepts it.
- */
-export type PatchResultDetails = {
-	changes: PatchResultChange[];
-	added: number;
-	removed: number;
-	fuzz: number;
-};
-
-/** Mirrors {@link PatchResultDetails}; keep both in sync when the result shape changes. */
 export const patchResultSchema = Type.Object({
 	changes: Type.Array(
 		Type.Object({
@@ -43,3 +21,6 @@ export const patchResultSchema = Type.Object({
 	removed: Type.Number(),
 	fuzz: Type.Number(),
 });
+
+export type PatchResultDetails = Static<typeof patchResultSchema>;
+export type PatchResultChange = PatchResultDetails["changes"][number];

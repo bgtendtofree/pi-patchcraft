@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { planPatch } from "./client.ts";
+import { checkCore, coreBinary, planPatch } from "./client.ts";
 import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
 import { scanPatchPreview } from "./preview.ts";
 import {
@@ -41,6 +41,8 @@ interface PatchcraftRenderState {
 export default function piPatchcraft(pi: ExtensionAPI): void {
 	let baselineTools: string[] | undefined;
 	let mode: PatchcraftMode = "auto";
+	let core: { binary: string; cwd: string; check: Promise<string | undefined> } | undefined;
+	let warned: string | undefined;
 
 	function wantsPatchcraft(ctx: ExtensionContext): boolean {
 		if (mode === "on") return true;
@@ -66,13 +68,19 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		}
 	}
 
-	function modeStatus(ctx: ExtensionContext): string {
-		const enabled = wantsPatchcraft(ctx);
-		const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none";
-		return `Patchcraft mode: ${mode}\nEffective: ${enabled ? "enabled" : "disabled"}\nModel: ${model}`;
+	function coreProblem(cwd: string): Promise<string | undefined> {
+		const binary = coreBinary();
+		if (core?.binary !== binary || core.cwd !== cwd) core = { binary, cwd, check: checkCore(binary, cwd) };
+		return core.check;
 	}
 
-	function syncTools(ctx: ExtensionContext): void {
+	function modeStatus(ctx: ExtensionContext, problem: string | undefined): string {
+		const enabled = wantsPatchcraft(ctx) && !problem;
+		const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none";
+		return `Patchcraft mode: ${mode}\nEffective: ${enabled ? "enabled" : "disabled"}\nModel: ${model}${problem ? `\n${problem}` : ""}`;
+	}
+
+	async function syncTools(ctx: ExtensionContext, notify = true): Promise<string | undefined> {
 		if (!baselineTools) {
 			// Pi restores the already-replaced loadout on resume/reload. Persist before replacing it.
 			// Without saved baseline metadata, capture current tools rather than guess edit/write.
@@ -80,13 +88,17 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			pi.appendEntry(baselineEntryType, { tools });
 			baselineTools = tools;
 		}
+		const problem = wantsPatchcraft(ctx) ? await coreProblem(ctx.cwd) : undefined;
 		const current = pi.getActiveTools();
 		const next = reconcileActiveTools({
 			baseline: baselineTools,
 			current,
-			usePatchcraft: wantsPatchcraft(ctx),
+			usePatchcraft: wantsPatchcraft(ctx) && !problem,
 		});
 		if (next.length !== current.length || next.some((name, index) => name !== current[index])) pi.setActiveTools(next);
+		if (problem && notify && problem !== warned) ctx.ui.notify(`Patchcraft disabled. ${problem}`, "warning");
+		warned = problem;
+		return problem;
 	}
 
 	pi.registerCommand("patchcraft", {
@@ -94,7 +106,8 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		async handler(args, ctx) {
 			const value = args.trim().toLowerCase();
 			if (value === "" || value === "status") {
-				ctx.ui.notify(`${modeStatus(ctx)}\nUsage: /patchcraft auto|on|off`, "info");
+				const problem = wantsPatchcraft(ctx) ? await coreProblem(ctx.cwd) : undefined;
+				ctx.ui.notify(`${modeStatus(ctx, problem)}\nUsage: /patchcraft auto|on|off`, problem ? "warning" : "info");
 				return;
 			}
 			if (value !== "auto" && value !== "on" && value !== "off") {
@@ -103,8 +116,9 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			}
 			mode = value;
 			pi.appendEntry<PatchcraftModeState>(modeEntryType, { mode });
-			syncTools(ctx);
-			ctx.ui.notify(modeStatus(ctx), "info");
+			if (mode !== "off") core = undefined;
+			const problem = await syncTools(ctx, false);
+			ctx.ui.notify(modeStatus(ctx, problem), problem ? "warning" : "info");
 		},
 	});
 	pi.registerTool({
@@ -208,14 +222,18 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.on("session_start", (_event, ctx) => {
+	pi.on("session_start", async (_event, ctx) => {
 		restoreState(ctx);
-		syncTools(ctx);
+		await syncTools(ctx);
 	});
-	pi.on("session_tree", (_event, ctx) => {
+	pi.on("session_tree", async (_event, ctx) => {
 		restoreState(ctx);
-		syncTools(ctx);
+		await syncTools(ctx);
 	});
-	pi.on("model_select", (_event, ctx) => syncTools(ctx));
-	pi.on("before_agent_start", (_event, ctx) => syncTools(ctx));
+	pi.on("model_select", async (_event, ctx) => {
+		await syncTools(ctx);
+	});
+	pi.on("before_agent_start", async (_event, ctx) => {
+		await syncTools(ctx);
+	});
 }
