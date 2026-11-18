@@ -1,11 +1,13 @@
 /**
  * Lark grammar for the Codex apply_patch format.
  *
- * Copied verbatim from openai/codex `codex-rs/tools/src/tool_apply_patch.lark` (revision af8a9d2).
+ * Copied verbatim from OpenAI Codex `codex-rs/core/assets/tools/apply_patch.lark`
+ * at the revision pinned in `rust/patchcraft-core/README.md`.
  * Capable models write the patch as raw text instead of a JSON-escaped string; Pi falls back to the
  * JSON-schema function tool on providers without grammar constrained sampling.
  *
- * The grammar should produce patches accepted by the Rust parser. It requires exactly one
+ * Like Codex, the runtime parser is authoritative: this grammar admits some shorthand it
+ * rejects (e.g. a move without a chunk). Pi requires exactly one
  * required string property in the tool parameters (here `patch`), or Pi rejects every request.
  */
 export const APPLY_PATCH_LARK_GRAMMAR = `start: begin_patch hunk+ end_patch

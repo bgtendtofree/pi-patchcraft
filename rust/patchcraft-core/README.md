@@ -41,14 +41,24 @@ does not undo a successful patch. Rollback is not crash recovery.
 
 ## Upstream code
 
-From [OpenAI Codex at `ca21fe65d18a9b6326759fb4263c65dfbb645aa5`](https://github.com/openai/codex/tree/ca21fe65d18a9b6326759fb4263c65dfbb645aa5/codex-rs/apply-patch/src):
+From [OpenAI Codex at `ca21fe65d18a9b6326759fb4263c65dfbb645aa5`](https://github.com/openai/codex/tree/ca21fe65d18a9b6326759fb4263c65dfbb645aa5):
 
-- `text_file.rs` reuses line-ending preservation and replacement code.
-- `file_update.rs` adapts replacement computation to supplied text.
-- `seek_sequence.rs` adapts matching tiers and Unicode punctuation mapping,
-  with Patchcraft's fuzz counts and comparison budget.
+- `src/parser.rs` and `src/streaming_parser.rs` reuse the runtime parser from
+  `codex-rs/apply-patch/src/`. The port removes Codex's `PathUri` integration
+  and returns only hunks and the environment directive; it adds no syntax rules.
+- `src/file_update.rs` uses the same replacement computation on text supplied
+  by the transaction. `src/seek_sequence.rs` uses the same match order,
+  whitespace, and punctuation rules, with a comparison budget and fuzz
+  accounting. `src/text_file.rs` retains the original newline handling.
+- `src/grammar.ts` in the Pi package embeds
+  `codex-rs/core/assets/tools/apply_patch.lark` unchanged.
+- `tests/fixtures/codex/` is the complete upstream scenario suite. The CLI
+  test runs all 25 cases, checking exact file bytes. The only expected
+  differences are scenarios **010** (no overwriting move destinations) and
+  **015** (preflight failures leave the workspace untouched).
 
-Those files are Apache-2.0; see [LICENSE](licenses/LICENSE) and
-[NOTICE](licenses/NOTICE). The parser preserves Patchcraft's existing strict
-envelope (including stacked contexts and move-only operations), rather than
-substituting Codex's streaming parser. The rest of the core is MIT.
+The upstream material is Apache-2.0; see [LICENSE](licenses/LICENSE) and
+[NOTICE](licenses/NOTICE). On upgrade, refresh parser and fixtures together
+and run `mise run rust:check`. Local transaction policy stays outside the parser:
+size limits, path validation, no remote routing, no-op update rejection,
+conflict checks, and rollback. The rest of the core is MIT.

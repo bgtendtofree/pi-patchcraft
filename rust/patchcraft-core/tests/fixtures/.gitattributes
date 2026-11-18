@@ -1,0 +1,2 @@
+# Preserve intentionally padded lines in the vendored Codex fixtures.
+codex/** whitespace=-blank-at-eol,-blank-at-eof

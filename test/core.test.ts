@@ -38,6 +38,37 @@ it("rejects incompatible session protocols without writing", () => {
 	assert.equal(existsSync(path.join(cwd.path, "fresh.txt")), false);
 });
 
+it("uses the Codex runtime parser for leniencies and empty hunks", async () => {
+	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
+	const add = "<<'EOF'\n*** Begin Patch\n  *** Add File: padded.txt  \n+first\n+\n+last\n*** End Patch\nEOF\n";
+	const plan = await planPatch(cwd.path, add);
+	await plan.apply();
+	await assert.rejects(
+		planPatch(cwd.path, "*** Begin Patch\n*** Update File: padded.txt\n*** Move to: moved.txt\n*** End Patch"),
+		/Update file hunk .* is empty/,
+	);
+	await assert.rejects(
+		planPatch(cwd.path, "*** Begin Patch\n*** Update File: padded.txt\n@@ first\n@@\n-last\n+changed\n*** End Patch"),
+		/Unexpected line found in update hunk/,
+	);
+	const update = await planPatch(
+		cwd.path,
+		"*** Begin Patch\n*** Update File: padded.txt\n@@\n first\n\n-last\n+changed\n*** End Patch",
+	);
+	await update.apply();
+	assert.equal(readFileSync(path.join(cwd.path, "padded.txt"), "utf8"), "first\n\nchanged\n");
+});
+
+it("rejects remote routing and invalid path data before a local mutation", async () => {
+	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
+	await assert.rejects(
+		planPatch(cwd.path, patch.replace("*** Begin Patch", "*** Begin Patch\n*** Environment ID: remote")),
+		/does not support \*\*\* Environment ID/,
+	);
+	await assert.rejects(planPatch(cwd.path, patch.replace("fresh.txt", "nul\0name.txt")), /path .*NUL/);
+	assert.equal(existsSync(path.join(cwd.path, "fresh.txt")), false);
+});
+
 it("EOF discards a plan when the host has not authorized commit", async () => {
 	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
 	const child = spawn(binary, ["session", "--json"], { cwd: cwd.path, stdio: ["pipe", "pipe", "inherit"] });

@@ -195,7 +195,7 @@ describe("pi-patchcraft extension", () => {
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
 		await assert.rejects(
 			tool.execute("empty", { patch: "" }, undefined, undefined, { cwd }),
-			/expected \*\*\* Begin Patch/,
+			/invalid patch: .* must be '\*\*\* End Patch'/,
 		);
 		await assert.rejects(tool.execute("invalid", { patch: "invalid" }, undefined, undefined, { cwd }));
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
@@ -508,7 +508,7 @@ describe("pi-patchcraft extension", () => {
 		assert.equal(tool?.constrainedSampling?.type, "grammar");
 		const grammarText = variants.openai_lark ?? "";
 		assert.ok(grammarText.length > 0);
-		// The grammar has to stay the patch language parser.ts accepts.
+		// These markers are part of Codex's constrained-sampling grammar.
 		for (const marker of [
 			"*** Begin Patch",
 			"*** End Patch",

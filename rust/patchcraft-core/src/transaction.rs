@@ -6,11 +6,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 
-use crate::parser::{Operation, parse_patch};
+use crate::file_update::apply_chunks;
+use crate::parser::{Hunk, parse_patch};
 use crate::paths::{
     Result, canonical, io_error, lexical_path, lstat, parent, resolve_links, resolve_parent,
 };
-use crate::{MAX_SOURCE_BYTES, aliases, apply_chunks};
+use crate::{MAX_PATCH_BYTES, MAX_SOURCE_BYTES, aliases};
 
 #[derive(Default)]
 pub struct Cancelled(AtomicBool);
@@ -139,10 +140,23 @@ impl Plan {
 
     pub fn build_with_cancel(cwd: &Path, patch: &str, cancelled: &Cancelled) -> Result<Self> {
         cancelled.check()?;
-        let operations = parse_patch(patch)?;
+        if patch.len() > MAX_PATCH_BYTES {
+            return Err(format!(
+                "Patch is too large: {} bytes exceeds 1 MiB limit",
+                patch.len()
+            ));
+        }
+        let parsed = parse_patch(patch).map_err(|error| error.to_string())?;
+        // A local transaction must never silently apply a patch addressed to a Codex environment.
+        if parsed.environment_id.is_some() {
+            return Err("Patchcraft does not support *** Environment ID: for local patches".into());
+        }
+        if parsed.hunks.is_empty() {
+            return Err("No files were modified.".into());
+        }
         let mut changes = Vec::new();
         let mut identities = HashMap::<PathBuf, Kind>::new();
-        for op in operations {
+        for op in parsed.hunks {
             cancelled.check()?;
             let change = build_change(cwd, op)?;
             for candidate in change.touches() {
@@ -283,20 +297,25 @@ impl Plan {
     }
 }
 
-fn build_change(cwd: &Path, op: Operation<'_>) -> Result<Change> {
+fn build_change(cwd: &Path, op: Hunk) -> Result<Change> {
     let (kind, path, move_to) = match &op {
-        Operation::Add { path, .. } => (Kind::Add, *path, None),
-        Operation::Delete { path } => (Kind::Delete, *path, None),
-        Operation::Update { path, move_to, .. } => (
-            if move_to.is_some() {
+        Hunk::AddFile { path, .. } => (Kind::Add, path, None),
+        Hunk::DeleteFile { path } => (Kind::Delete, path, None),
+        Hunk::UpdateFile {
+            path, move_path, ..
+        } => (
+            if move_path.is_some() {
                 Kind::Move
             } else {
                 Kind::Update
             },
-            *path,
-            *move_to,
+            path,
+            move_path.as_deref(),
         ),
     };
+    // The parser constructs these paths from UTF-8; resolve them with Pi's path rules.
+    let path = crate::paths::wire_path(path)?;
+    let move_to = move_to.map(crate::paths::wire_path).transpose()?;
     let lexical = lexical_path(cwd, path)?;
     let absolute = resolve_parent(&lexical)?;
     let resolved = resolve_links(&absolute)?;
@@ -330,14 +349,13 @@ fn build_change(cwd: &Path, op: Operation<'_>) -> Result<Change> {
     } else {
         (source.clone(), None, None)
     };
-    let (after, fuzz) = match op {
-        Operation::Add { content, .. } => (Some(content.into_bytes()), 0),
-        Operation::Delete { .. } => (None, 0),
-        Operation::Update { chunks, .. } => {
+    let (after, fuzz) = match &op {
+        Hunk::AddFile { contents, .. } => (Some(contents.as_bytes().to_vec()), 0),
+        Hunk::DeleteFile { .. } => (None, 0),
+        Hunk::UpdateFile { chunks, .. } => {
             let original = std::str::from_utf8(before.as_deref().expect("existing source"))
                 .map_err(|_| format!("Patch source is not valid UTF-8: {path}"))?;
-            let updated =
-                apply_chunks(original, path, &chunks).map_err(|error| error.to_string())?;
+            let updated = apply_chunks(original, path, chunks)?;
             (Some(updated.content.into_bytes()), updated.fuzz)
         }
     };
@@ -636,7 +654,7 @@ mod tests {
         fs::write(cwd.join("source"), "original\n").unwrap();
         let p = plan(
             cwd,
-            "*** Update File: source\n*** Move to: target\n*** Add File: fail\n+x",
+            "*** Update File: source\n*** Move to: target\n@@\n original\n*** Add File: fail\n+x",
         );
         let error = p
             .apply_with(&Cancelled::default(), &mut |step, path| {

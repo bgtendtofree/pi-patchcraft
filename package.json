@@ -26,6 +26,7 @@
 	],
 	"files": [
 		"src",
+		"rust/patchcraft-core/licenses",
 		"README.md",
 		"LICENSE"
 	],

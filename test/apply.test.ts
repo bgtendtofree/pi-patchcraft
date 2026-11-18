@@ -170,13 +170,17 @@ describe("patch planning and application", () => {
 		assert.equal(await readFile(noFinalNewlineTarget, "utf8"), "before\nchanged\n");
 	});
 
-	it("strips a leading BOM for matching and preserves it on write", async () => {
+	it("treats a leading BOM as part of the first line, like Codex", async () => {
 		const cwd = await workspace();
 		const target = path.join(cwd, "bom.txt");
 		await writeFile(target, "\uFEFFbefore\nafter\n");
+		await assert.rejects(
+			planPatch(cwd, "*** Begin Patch\n*** Update File: bom.txt\n@@\n-before\n+changed\n*** End Patch"),
+			/Failed to find expected lines/,
+		);
 		const plan = await planPatch(
 			cwd,
-			"*** Begin Patch\n*** Update File: bom.txt\n@@\n-before\n+changed\n*** End Patch",
+			"*** Begin Patch\n*** Update File: bom.txt\n@@\n-\uFEFFbefore\n+\uFEFFchanged\n*** End Patch",
 		);
 		await applyPatchPlan(plan);
 		assert.equal(await readFile(target, "utf8"), "\uFEFFchanged\nafter\n");
@@ -340,6 +344,8 @@ describe("patch planning and application", () => {
 				`*** Begin Patch
 *** Update File: source.txt
 *** Move to: real/new.txt
+@@
+ precious
 *** Add File: link.txt
 +second
 *** End Patch`,
@@ -516,7 +522,7 @@ describe("patch planning and application", () => {
 		await writeFile(source, "source\n");
 		const plan = await planPatch(
 			cwd,
-			"*** Begin Patch\n*** Update File: source.txt\n*** Move to: target.txt\n*** End Patch",
+			"*** Begin Patch\n*** Update File: source.txt\n*** Move to: target.txt\n@@\n source\n*** End Patch",
 		);
 		await writeFile(target, "concurrent\n");
 		await assert.rejects(applyPatchPlan(plan), /target changed before apply/);
@@ -551,7 +557,7 @@ describe("patch planning and application", () => {
 		await chmod(source, 0o755);
 		const plan = await planPatch(
 			cwd,
-			"*** Begin Patch\n*** Update File: source.sh\n*** Move to: target.sh\n*** End Patch",
+			"*** Begin Patch\n*** Update File: source.sh\n*** Move to: target.sh\n@@\n echo test\n*** End Patch",
 		);
 		await applyPatchPlan(plan);
 		assert.equal((await stat(target)).mode & 0o777, 0o755);
@@ -657,6 +663,8 @@ describe("patch planning and application", () => {
 +first
 *** Update File: source.txt
 *** Move to: FRESH.txt
+@@
+ old
 *** End Patch`,
 			),
 			/conflicting operations/,
@@ -704,8 +712,12 @@ describe("patch planning and application", () => {
 				`*** Begin Patch
 *** Update File: first.txt
 *** Move to: nested/caf\u00e9.txt
+@@
+ FIRST
 *** Update File: second.txt
 *** Move to: nested/cafe\u0301.txt
+@@
+ SECOND
 *** End Patch`,
 			),
 			/conflicting operations/,
@@ -973,8 +985,12 @@ describe("patch planning and application", () => {
 					`*** Begin Patch
 *** Update File: one.txt
 *** Move to: ${left}
+@@
+ FIRST
 *** Update File: two.txt
 *** Move to: ${right}
+@@
+ SECOND
 *** End Patch`,
 				),
 				/conflicting operations/,
@@ -1066,7 +1082,7 @@ describe("patch planning and application", () => {
 		await writeFile(source, "original\n");
 		const plan = await planPatch(
 			cwd,
-			"*** Begin Patch\n*** Update File: source/file.txt\n*** Move to: target/moved.txt\n*** End Patch",
+			"*** Begin Patch\n*** Update File: source/file.txt\n*** Move to: target/moved.txt\n@@\n original\n*** End Patch",
 		);
 		// The read-only source directory makes the unlink fail after the destination was written. The
 		// source still holds the original inode, so rollback only removes the destination copy; it must
@@ -1126,7 +1142,7 @@ describe("patch planning and application", () => {
 		try {
 			const plan = await planPatch(
 				cwd,
-				"*** Begin Patch\n*** Update File: source.txt\n*** Move to: moved.txt\n*** End Patch",
+				"*** Begin Patch\n*** Update File: source.txt\n*** Move to: moved.txt\n@@\n original\n*** End Patch",
 			);
 			await applyPatchPlan(plan);
 			assert.equal(await readFile(path.join(cwd, "moved.txt"), "utf8"), "original\n");
