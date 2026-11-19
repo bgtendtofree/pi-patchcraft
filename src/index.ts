@@ -5,6 +5,12 @@ import { checkCore, coreBinary, planPatch } from "./client.ts";
 import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
 import { scanPatchPreview } from "./preview.ts";
 import {
+	APPLY_PATCH_DESCRIPTION,
+	APPLY_PATCH_PARAMETER_DESCRIPTION,
+	APPLY_PATCH_PROMPT_GUIDELINES,
+	APPLY_PATCH_PROMPT_SNIPPET,
+} from "./prompt.ts";
+import {
 	formatPatchCall,
 	formatPatchError,
 	formatPatchProgress,
@@ -16,7 +22,7 @@ import { type PatchResultDetails, patchResultSchema } from "./types.ts";
 
 const patchParameters = Type.Object({
 	patch: Type.String({
-		description: "The entire contents of the apply_patch command",
+		description: APPLY_PATCH_PARAMETER_DESCRIPTION,
 	}),
 });
 
@@ -156,12 +162,9 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "apply_patch",
 		label: "Apply Patch",
-		description: "Apply a Codex-format patch to add, update, move, or delete files.",
-		promptSnippet: "Add, update, move, or delete files with apply_patch",
-		promptGuidelines: [
-			"Use apply_patch for file edits when available, combining related multi-file changes in one patch.",
-			"Keep each hunk's context short (2-3 lines) and split large edits into smaller patches.",
-		],
+		description: APPLY_PATCH_DESCRIPTION,
+		promptSnippet: APPLY_PATCH_PROMPT_SNIPPET,
+		promptGuidelines: APPLY_PATCH_PROMPT_GUIDELINES,
 		parameters: patchParameters,
 		annotations: {
 			readOnlyHint: false,
