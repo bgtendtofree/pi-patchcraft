@@ -144,20 +144,29 @@ pi -e git:github.com/bgtendtofree/pi-patchcraft
 
 ## Rendering
 
-Patchcraft registers `renderCall` and `renderResult`. The call row shows a Codex-style summary, per-file counters while the patch streams, and a multi-file roster. Once the arguments are complete, it adds a bounded glimpse of the focused file. The call row owns the summary; the result row replaces the glimpse with each file's real diff through Pi's native `renderDiff`.
+Patchcraft registers `renderCall` and `renderResult`. The call row previews the request: a Codex-style summary, per-file counters while the patch streams, a multi-file roster, and a bounded glimpse of the focused file once the arguments are complete. When execution starts, a single-file call row keeps its header and counts; a multi-file call row keeps only the tool name, leaving the exact totals, roster, and diffs to the result row. The result row is self-contained: a single-file patch shows its full diff (matching Pi's `edit`), while a multi-file patch shows the exact counts and the roster, plus an expand hint when there are diffs; expanded results add bounded per-file diffs through Pi's native `renderDiff`.
 
 ```text
 apply_patch  Edited src/app.ts (+3 -1)
 ```
 
 ```text
-apply_patch  Edited 3 files (+5 -2)
+apply_patch  Edited 3 files
+  └ M src/app.ts (+3 -1)
+  └ A src/new.ts (+2 -0)
+  └ D old.txt
+```
+
+Once the result arrives, the result row carries the exact totals and keeps the roster:
+
+```text
+Edited 3 files (+5 -2)
   └ M src/app.ts (+3 -1)
   └ A src/new.ts (+2 -0)
   └ D old.txt (+0 -1)
 ```
 
-A single-file patch shows its full diff immediately, matching Pi's `edit`; a multi-file patch shows the roster and an expand hint until expanded, then bounded per-file diffs. It does not register `renderShell: "self"`, so Pi's default row keeps pending/success/error backgrounds and output padding.
+The result row does not depend on the call row's cached text, so hosts that snapshot rows separately (for example the HTML exporter) still show the exact multi-file summary and roster. Patchcraft does not register `renderShell: "self"`, so Pi's default row keeps pending/success/error backgrounds and output padding.
 
 Patch execution and returned `content`, `details`, and `structuredContent` are unchanged, including per-file `displayDiff` and added/removed/fuzz counts.
 

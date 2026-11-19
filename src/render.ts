@@ -92,11 +92,33 @@ function singleHeader(file: PreviewFile, theme: RenderTheme): string {
 function multiAction(files: readonly PreviewFile[]): string {
 	if (files.length > 0 && files.every((file) => file.operation === "add")) return "Added";
 	if (files.length > 0 && files.every((file) => file.operation === "delete")) return "Deleted";
+	if (files.length > 0 && files.every((file) => file.operation === "move" && file.added === 0 && file.removed === 0)) {
+		return "Moved";
+	}
 	return "Edited";
 }
 
-function multiHeader(files: readonly PreviewFile[], added: number, removed: number, theme: RenderTheme): string {
-	return `${title(theme)}  ${theme.fg("toolTitle", `${multiAction(files)} ${files.length} files`)} ${countsLabel(theme, added, removed)}`;
+function multiSummary(
+	files: readonly PreviewFile[],
+	added: number,
+	removed: number,
+	theme: RenderTheme,
+	showCounts: boolean,
+): string {
+	const action = theme.fg("toolTitle", `${multiAction(files)} ${files.length} files`);
+	const empty =
+		added === 0 && removed === 0 && files.every((file) => file.operation === "move" || file.operation === "delete");
+	return showCounts && !empty ? `${action} ${countsLabel(theme, added, removed)}` : action;
+}
+
+function multiHeader(
+	files: readonly PreviewFile[],
+	added: number,
+	removed: number,
+	theme: RenderTheme,
+	showCounts: boolean,
+): string {
+	return `${title(theme)}  ${multiSummary(files, added, removed, theme, showCounts)}`;
 }
 
 function rosterLine(file: PreviewFile, theme: RenderTheme): string {
@@ -145,7 +167,7 @@ function appendGlimpse(
 interface CallPreviewOptions {
 	expanded: boolean;
 	argsComplete: boolean;
-	includeRoster: boolean;
+	executionStarted: boolean;
 }
 
 function formatCallPreview(preview: PatchPreview, theme: RenderTheme, options: CallPreviewOptions): string {
@@ -153,20 +175,26 @@ function formatCallPreview(preview: PatchPreview, theme: RenderTheme, options: C
 	if (preview.files.length === 1) {
 		const file = preview.files[0] as PreviewFile;
 		const lines = [singleHeader(file, theme)];
-		if (options.argsComplete) appendGlimpse(lines, file, theme, options.expanded, "  ");
-		if (preview.truncated) lines.push(`  ${theme.fg("muted", "(large patch; preview truncated)")}`);
+		if (options.argsComplete && !options.executionStarted) {
+			appendGlimpse(lines, file, theme, options.expanded, "  ");
+		}
+		if (preview.truncated && !options.executionStarted) {
+			lines.push(`  ${theme.fg("muted", "(large patch; preview truncated)")}`);
+		}
 		return lines.join("\n");
 	}
 
-	const lines = [multiHeader(preview.files, preview.added, preview.removed, theme)];
+	// Once execution starts, the result row owns the summary, roster, and exact counts.
+	if (options.executionStarted) return title(theme);
+	// Delete counts are only known after reading the source, so omit uncertain totals from the preview.
+	const showCounts = preview.files.every((file) => file.operation !== "delete");
+	const lines = [multiHeader(preview.files, preview.added, preview.removed, theme, showCounts)];
 	const max = options.expanded ? MAX_ROSTER_EXPANDED : MAX_ROSTER_COLLAPSED;
 	const visible = preview.files.slice(0, max);
 	const focus = options.argsComplete ? focusFile(visible) : undefined;
-	if (options.includeRoster) {
-		for (const file of visible) {
-			lines.push(rosterLine(file, theme));
-			if (file === focus) appendGlimpse(lines, file, theme, options.expanded, "    ");
-		}
+	for (const file of visible) {
+		lines.push(rosterLine(file, theme));
+		if (file === focus) appendGlimpse(lines, file, theme, options.expanded, "    ");
 	}
 	const hidden = preview.files.length - visible.length;
 	if (hidden > 0) lines.push(hiddenFiles(hidden, theme));
@@ -177,9 +205,13 @@ function formatCallPreview(preview: PatchPreview, theme: RenderTheme, options: C
 export function formatPatchCall(
 	preview: PatchPreview,
 	theme: RenderTheme,
-	options: { expanded: boolean; argsComplete: boolean },
+	options: { expanded: boolean; argsComplete: boolean; executionStarted?: boolean },
 ): string {
-	return formatCallPreview(preview, theme, { ...options, includeRoster: true });
+	return formatCallPreview(preview, theme, {
+		expanded: options.expanded,
+		argsComplete: options.argsComplete,
+		executionStarted: options.executionStarted ?? false,
+	});
 }
 
 interface RenderedDiff {
@@ -200,10 +232,8 @@ function indent(lines: readonly string[], prefix: string): string[] {
 	return lines.map((line) => `${prefix}${line}`);
 }
 
-function truncationHint(theme: RenderTheme, expanded: boolean, keyHint: KeyHint): string {
-	return expanded
-		? `  ${theme.fg("muted", "… output truncated")}`
-		: `  ${theme.fg("muted", `… more lines, ${keyHint("app.tools.expand", "to expand")}`)}`;
+function outputTruncated(theme: RenderTheme): string {
+	return `  ${theme.fg("muted", "… output truncated")}`;
 }
 
 function expandHint(theme: RenderTheme, keyHint: KeyHint): string {
@@ -221,27 +251,6 @@ function previewFromChange(change: PatchResultChange): PreviewFile {
 	};
 }
 
-function previewFromResult(details: PatchResultDetails): PatchPreview {
-	return {
-		files: details.changes.map(previewFromChange),
-		added: details.added,
-		removed: details.removed,
-		truncated: false,
-	};
-}
-
-export function formatPatchSummary(
-	details: PatchResultDetails,
-	theme: RenderTheme,
-	options: { expanded: boolean },
-): string {
-	return formatCallPreview(previewFromResult(details), theme, {
-		expanded: options.expanded,
-		argsComplete: false,
-		includeRoster: !options.expanded,
-	});
-}
-
 function formatSingleResult(change: PatchResultChange): string {
 	// Match Pi's edit tool: a single-file diff is shown in full, without a collapsed cap.
 	const diff = renderChangeDiff(change, Number.POSITIVE_INFINITY);
@@ -254,16 +263,17 @@ function formatMultiResult(
 	expanded: boolean,
 	keyHint: KeyHint,
 ): string {
-	const hasDiff = details.changes.some((change) => change.displayDiff.trim().length > 0);
-	if (!expanded) return hasDiff ? expandHint(theme, keyHint) : "";
-
-	const max = MAX_ROSTER_EXPANDED;
+	// The result row is self-contained: exact counts, roster, and (when expanded) diffs. The call row
+	// only previews the request, so this also renders correctly in hosts that snapshot rows separately.
+	const files = details.changes.map(previewFromChange);
+	const lines = [multiSummary(files, details.added, details.removed, theme, true)];
+	const max = expanded ? MAX_ROSTER_EXPANDED : MAX_ROSTER_COLLAPSED;
 	const visible = details.changes.slice(0, max);
-	const lines: string[] = [];
 	let remaining = MAX_DIFF_EXPANDED;
 	let truncated = false;
 	for (const change of visible) {
 		lines.push(rosterLine(previewFromChange(change), theme));
+		if (!expanded) continue;
 		if (remaining <= 0) {
 			truncated = true;
 			continue;
@@ -275,7 +285,9 @@ function formatMultiResult(
 	}
 	const hidden = details.changes.length - visible.length;
 	if (hidden > 0) lines.push(hiddenFiles(hidden, theme));
-	if (truncated) lines.push(truncationHint(theme, true, keyHint));
+	if (expanded && truncated) lines.push(outputTruncated(theme));
+	const hasDiff = details.changes.some((change) => change.displayDiff.trim().length > 0);
+	if (!expanded && hasDiff) lines.push(expandHint(theme, keyHint));
 	return lines.join("\n");
 }
 

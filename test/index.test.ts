@@ -78,9 +78,9 @@ function extensionHarness(tools: string[], sessionManager = SessionManager.inMem
 			assert.ok(command);
 			await command.handler(value, context);
 		},
-		emit(name: string, reason = "startup") {
+		emit(name: string, reason = "startup", eventContext = context) {
 			assert.ok(handlers.has(name));
-			return handlers.get(name)?.({ type: name, reason }, context);
+			return handlers.get(name)?.({ type: name, reason }, eventContext);
 		},
 	};
 	piPatchcraft({
@@ -275,6 +275,80 @@ describe("pi-patchcraft extension", () => {
 		entries.push({ type: "custom", customType: "patchcraft-mode", data: { mode: "off" } });
 		await handlers.get("session_tree")?.({}, context);
 		assert.deepEqual(activeTools, ["read", "edit", "write", "bash"]);
+	});
+
+	it("reports the active loadout rather than the selected mode", async () => {
+		const harness = extensionHarness(["read", "edit", "write", "bash"]);
+		await harness.emit("session_start");
+		assert.deepEqual(harness.tools, ["read", "bash", "apply_patch"]);
+
+		// Simulate a manual tool change that no extension event has reconciled yet.
+		harness.tools = ["read", "edit", "write", "bash"];
+		await harness.mode("status");
+		assert.match(harness.notifications.at(-1) ?? "", /Effective: disabled/);
+	});
+
+	it("warns again for a new session while the core is still unavailable", async () => {
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-warn-"));
+		temporaryDirectories.push(cwd);
+		const saved = process.env.PATCHCRAFT_BIN;
+		assert.ok(saved);
+		try {
+			process.env.PATCHCRAFT_BIN = path.join(cwd, "missing");
+			const harness = extensionHarness(["read", "edit"]);
+			await harness.emit("session_start");
+			assert.equal(harness.notifications.length, 1);
+
+			harness.context.sessionManager = SessionManager.inMemory();
+			harness.tools = ["read", "edit"];
+			await harness.emit("session_start", "new");
+			assert.equal(harness.notifications.length, 2);
+			assert.match(harness.notifications[1] ?? "", /disabled.*not found/);
+		} finally {
+			process.env.PATCHCRAFT_BIN = saved;
+		}
+	});
+
+	it("does not repeat the core warning on tree navigation", async () => {
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-warn-tree-"));
+		temporaryDirectories.push(cwd);
+		const saved = process.env.PATCHCRAFT_BIN;
+		assert.ok(saved);
+		try {
+			process.env.PATCHCRAFT_BIN = path.join(cwd, "missing");
+			const harness = extensionHarness(["read", "edit"]);
+			await harness.emit("session_start");
+			assert.equal(harness.notifications.length, 1);
+			await harness.emit("session_tree");
+			assert.equal(harness.notifications.length, 1);
+		} finally {
+			process.env.PATCHCRAFT_BIN = saved;
+		}
+	});
+
+	it("applies queued loadout syncs in event order", async () => {
+		if (process.platform === "win32") return;
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-queue-"));
+		temporaryDirectories.push(cwd);
+		const saved = process.env.PATCHCRAFT_BIN;
+		assert.ok(saved);
+		try {
+			const slow = path.join(cwd, "slow-core");
+			await writeFile(slow, `#!/bin/sh\nsleep 0.2\nprintf '%s\\n' '{"protocol":4}'\n`, { mode: 0o755 });
+			process.env.PATCHCRAFT_BIN = slow;
+			const harness = extensionHarness(["read", "edit", "write", "bash"]);
+			const gpt = { ...harness.context, model: { id: "gpt-5", provider: "openai" } };
+			const claude = { ...harness.context, model: { id: "claude-sonnet-4", provider: "anthropic" } };
+
+			const started = harness.emit("session_start", "startup", gpt);
+			const selected = harness.emit("model_select", "startup", claude);
+			await Promise.all([started, selected]);
+
+			// The slower, earlier sync must not overwrite the later model selection.
+			assert.deepEqual(harness.tools, ["read", "edit", "write", "bash"]);
+		} finally {
+			process.env.PATCHCRAFT_BIN = saved;
+		}
 	});
 
 	it("keeps baseline editing available when the core is missing or incompatible", async () => {
@@ -495,8 +569,28 @@ describe("pi-patchcraft extension", () => {
 		assert.match(resultText, /before/);
 		assert.match(resultText, /after/);
 		assert.doesNotMatch(resultText, /apply_patch/);
-		const settledCallText = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
-		assert.doesNotMatch(settledCallText, /before/);
+
+		// The result row must not rewrite the call row; the call preview stays visible.
+		const previewCallText = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
+		assert.match(previewCallText, /-before/);
+
+		// Once execution starts, the call row drops the glimpse and leaves the diff to the result row.
+		const executing = (tool.renderCall as (args: unknown, theme: unknown, context: unknown) => unknown)(
+			{ patch },
+			theme,
+			{
+				expanded: false,
+				argsComplete: true,
+				executionStarted: true,
+				state,
+				lastComponent: call,
+			},
+		);
+		assert.ok(executing);
+		const executingText = stripTerminalSequences(
+			(executing as { render(width: number): string[] }).render(80).join("\n"),
+		);
+		assert.equal(executingText.trimEnd(), "apply_patch  Edited value.txt (+1 -1)");
 		assert.equal(result.details.added, 1);
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
 
@@ -509,6 +603,107 @@ describe("pi-patchcraft extension", () => {
 			{ isError: true, lastComponent: undefined, keyHint: renderKeyHint },
 		);
 		assert.ok(error);
+	});
+
+	it("invalidates the call preview when the same theme object changes colors", () => {
+		const { tool } = extensionHarness([]);
+		const patch = "*** Begin Patch\n*** Update File: value.txt\n@@\n-before\n+after";
+		const state = {};
+		let tone = "a";
+		const theme = {
+			fg: (color: string, text: string) => `<${tone}:${color}>${text}`,
+			bold: (text: string) => text,
+		};
+		const render = () =>
+			(tool.renderCall as (args: unknown, theme: unknown, context: unknown) => { render(width: number): string[] })(
+				{ patch },
+				theme,
+				{ expanded: false, argsComplete: false, state, lastComponent: undefined },
+			);
+
+		const first = stripTerminalSequences(render().render(80).join("\n"));
+		assert.match(first, /<a:toolTitle>/);
+		tone = "b";
+		const second = stripTerminalSequences(render().render(80).join("\n"));
+		assert.match(second, /<b:toolTitle>/);
+	});
+
+	it("renders the exact multi-file result without rewriting the call row", () => {
+		const { tool } = extensionHarness([]);
+		const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+		const renderKeyHint = (keybinding: string, description: string) => `${keybinding} ${description}`;
+		const patch = "*** Begin Patch\n*** Update File: a.ts\n@@\n-old\n+new\n*** Delete File: old.txt\n*** End Patch";
+		const state = {};
+		const call = (tool.renderCall as (args: unknown, theme: unknown, context: unknown) => unknown)({ patch }, theme, {
+			expanded: false,
+			argsComplete: true,
+			executionStarted: true,
+			state,
+			lastComponent: undefined,
+		});
+		assert.ok(call);
+		const callText = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
+		assert.equal(callText.trimEnd(), "apply_patch");
+
+		const details = {
+			changes: [
+				{
+					operation: "update",
+					path: "a.ts",
+					targetPath: "a.ts",
+					displayDiff: "-1 old\n+1 new",
+					added: 1,
+					removed: 1,
+					fuzz: 0,
+				},
+				{
+					operation: "delete",
+					path: "old.txt",
+					targetPath: "old.txt",
+					displayDiff: "-1 gone",
+					added: 0,
+					removed: 1,
+					fuzz: 0,
+				},
+			],
+			added: 1,
+			removed: 2,
+			fuzz: 0,
+		};
+		const rendered = (
+			tool.renderResult as (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown
+		)({ content: [{ type: "text", text: "Patch applied" }], details }, { expanded: false, isPartial: false }, theme, {
+			isError: false,
+			lastComponent: undefined,
+			keyHint: renderKeyHint,
+			state,
+		});
+		assert.ok(rendered);
+		const resultText = stripTerminalSequences((rendered as { render(width: number): string[] }).render(80).join("\n"));
+		assert.match(resultText, /Edited 2 files \(\+1 -2\)/);
+		assert.match(resultText, /└ M a\.ts \(\+1 -1\)/);
+		assert.match(resultText, /└ D old\.txt \(\+0 -1\)/);
+		assert.match(resultText, /app\.tools\.expand to expand diffs/);
+
+		// Expanding after the result must render the diffs without touching the call row.
+		const expanded = (
+			tool.renderResult as (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown
+		)({ content: [{ type: "text", text: "Patch applied" }], details }, { expanded: true, isPartial: false }, theme, {
+			isError: false,
+			lastComponent: undefined,
+			keyHint: renderKeyHint,
+			state,
+		});
+		assert.ok(expanded);
+		const expandedText = stripTerminalSequences(
+			(expanded as { render(width: number): string[] }).render(80).join("\n"),
+		);
+		assert.match(expandedText, /old/);
+		assert.match(expandedText, /new/);
+
+		// A host that snapshots the call row before the result still gets the exact result row.
+		const after = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
+		assert.equal(after, callText);
 	});
 
 	it("declares grammar constrained sampling for capable models", () => {

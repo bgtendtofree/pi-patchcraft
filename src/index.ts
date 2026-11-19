@@ -9,7 +9,6 @@ import {
 	formatPatchError,
 	formatPatchProgress,
 	formatPatchResult,
-	formatPatchSummary,
 	type RenderTheme,
 } from "./render.ts";
 import { isPatchcraftModel, reconcileActiveTools } from "./tools.ts";
@@ -34,8 +33,20 @@ interface PatchcraftRenderState {
 	callPatch?: string;
 	callOptions?: string;
 	callText?: string;
-	callTheme?: RenderTheme;
-	callComponent?: Text;
+	callThemeKey?: string;
+}
+
+/** Pi's theme is a stable proxy, so cache identity is a fingerprint of the colors we render. */
+function themeFingerprint(theme: RenderTheme): string {
+	return [
+		theme.fg("muted", ""),
+		theme.fg("accent", ""),
+		theme.fg("toolTitle", ""),
+		theme.fg("toolDiffAdded", ""),
+		theme.fg("toolDiffRemoved", ""),
+		theme.fg("toolDiffContext", ""),
+		theme.fg("warning", ""),
+	].join("|");
 }
 
 export default function piPatchcraft(pi: ExtensionAPI): void {
@@ -43,6 +54,8 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	let mode: PatchcraftMode = "auto";
 	let core: { binary: string; cwd: string; check: Promise<string | undefined> } | undefined;
 	let warned: string | undefined;
+	let generation = 0;
+	let syncing: Promise<unknown> = Promise.resolve();
 
 	function wantsPatchcraft(ctx: ExtensionContext): boolean {
 		if (mode === "on") return true;
@@ -50,7 +63,9 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		return isPatchcraftModel(ctx.model?.id, ctx.model?.api);
 	}
 
-	function restoreState(ctx: ExtensionContext): void {
+	function restoreState(ctx: ExtensionContext, resetWarnings = false): void {
+		generation++;
+		if (resetWarnings) warned = undefined;
 		mode = "auto";
 		baselineTools = undefined;
 		for (const entry of ctx.sessionManager.getBranch()) {
@@ -75,12 +90,28 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	}
 
 	function modeStatus(ctx: ExtensionContext, problem: string | undefined): string {
-		const enabled = wantsPatchcraft(ctx) && !problem;
+		// Report the loadout Pi actually has, not just the selected mode.
+		const enabled = pi.getActiveTools().includes("apply_patch") && !problem;
 		const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none";
 		return `Patchcraft mode: ${mode}\nEffective: ${enabled ? "enabled" : "disabled"}\nModel: ${model}${problem ? `\n${problem}` : ""}`;
 	}
 
-	async function syncTools(ctx: ExtensionContext, notify = true): Promise<string | undefined> {
+	function syncTools(ctx: ExtensionContext, notify = true): Promise<string | undefined> {
+		const currentGeneration = generation;
+		const result = syncing.then(() => syncToolsNow(ctx, notify, currentGeneration));
+		syncing = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
+	}
+
+	async function syncToolsNow(
+		ctx: ExtensionContext,
+		notify: boolean,
+		currentGeneration: number,
+	): Promise<string | undefined> {
+		if (currentGeneration !== generation) return undefined;
 		if (!baselineTools) {
 			// Pi restores the already-replaced loadout on resume/reload. Persist before replacing it.
 			// Without saved baseline metadata, capture current tools rather than guess edit/write.
@@ -89,6 +120,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			baselineTools = tools;
 		}
 		const problem = wantsPatchcraft(ctx) ? await coreProblem(ctx.cwd) : undefined;
+		if (currentGeneration !== generation) return undefined;
 		const current = pi.getActiveTools();
 		const next = reconcileActiveTools({
 			baseline: baselineTools,
@@ -143,18 +175,19 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		renderCall(args, theme, context) {
 			const state = context.state as PatchcraftRenderState;
 			const patch = typeof args?.patch === "string" ? args.patch : "";
-			const options = `${context.expanded}:${context.argsComplete}`;
-			if (state.callPatch !== patch || state.callOptions !== options || state.callTheme !== theme) {
+			const options = `${context.expanded}:${context.argsComplete}:${context.executionStarted}`;
+			const themeKey = themeFingerprint(theme);
+			if (state.callPatch !== patch || state.callOptions !== options || state.callThemeKey !== themeKey) {
 				state.callPatch = patch;
 				state.callOptions = options;
 				state.callText = formatPatchCall(scanPatchPreview(patch), theme, {
 					expanded: context.expanded,
 					argsComplete: context.argsComplete,
+					executionStarted: context.executionStarted,
 				});
-				state.callTheme = theme;
+				state.callThemeKey = themeKey;
 			}
 			const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
-			state.callComponent = component;
 			component.setText(state.callText ?? "");
 			return component;
 		},
@@ -169,12 +202,6 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 				return component;
 			}
 			const details = result.details as PatchResultDetails | undefined;
-			if (details) {
-				// Replace the streaming estimate with the exact counts from the executed plan.
-				const state = context.state as PatchcraftRenderState;
-				state.callText = formatPatchSummary(details, theme, { expanded: options.expanded });
-				state.callComponent?.setText(state.callText);
-			}
 			component.setText(
 				details
 					? formatPatchResult(details, theme, { expanded: options.expanded, keyHint: context.keyHint })
@@ -223,7 +250,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		restoreState(ctx);
+		restoreState(ctx, true);
 		await syncTools(ctx);
 	});
 	pi.on("session_tree", async (_event, ctx) => {

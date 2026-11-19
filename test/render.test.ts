@@ -7,7 +7,6 @@ import {
 	formatPatchError,
 	formatPatchProgress,
 	formatPatchResult,
-	formatPatchSummary,
 	type RenderTheme,
 } from "../src/render.ts";
 import type { PatchResultDetails } from "../src/types.ts";
@@ -79,6 +78,44 @@ describe("formatPatchCall", () => {
 		assert.doesNotMatch(text, /-old/);
 	});
 
+	it("drops the call preview roster and glimpse once execution starts", () => {
+		const preview = scanPatchPreview(
+			"*** Begin Patch\n*** Update File: a.ts\n@@\n-old\n+new\n*** Add File: b.ts\n+one",
+		);
+		const before = formatPatchCall(preview, theme, { expanded: false, argsComplete: true });
+		assert.match(before, /└ M a\.ts/);
+		assert.match(before, /\+one/);
+		const after = formatPatchCall(preview, theme, {
+			expanded: false,
+			argsComplete: true,
+			executionStarted: true,
+		});
+		assert.equal(after, "apply_patch");
+	});
+
+	it("keeps single-file counts and drops only the glimpse once execution starts", () => {
+		const preview = scanPatchPreview("*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new");
+		const after = formatPatchCall(preview, theme, {
+			expanded: false,
+			argsComplete: true,
+			executionStarted: true,
+		});
+		assert.equal(after, "apply_patch  Edited src/app.ts (+1 -1)");
+	});
+
+	it("labels an all-move multi-file patch", () => {
+		const preview = scanPatchPreview(
+			"*** Begin Patch\n*** Update File: a.ts\n*** Move to: b.ts\n*** Update File: c.ts\n*** Move to: d.ts",
+		);
+		assert.match(formatPatchCall(preview, theme, { expanded: false, argsComplete: false }), /Moved 2 files/);
+	});
+
+	it("omits uncertain delete totals from the multi-file call preview", () => {
+		const preview = scanPatchPreview("*** Begin Patch\n*** Delete File: a.txt\n*** Update File: b.ts\n@@\n-x\n+y");
+		const [header] = formatPatchCall(preview, theme, { expanded: false, argsComplete: false }).split("\n");
+		assert.equal(header, "apply_patch  Edited 2 files");
+	});
+
 	it("labels rename-only moves and deletes", () => {
 		const move = scanPatchPreview("*** Begin Patch\n*** Update File: old.rs\n*** Move to: new.rs");
 		assert.equal(
@@ -136,6 +173,35 @@ describe("formatPatchResult", () => {
 		assert.doesNotMatch(text, /more lines/);
 	});
 
+	it("shows the exact multi-file summary and roster without expansion", () => {
+		const result = details([
+			{
+				operation: "update",
+				path: "a.ts",
+				targetPath: "a.ts",
+				displayDiff: "-1 old\n+1 new",
+				added: 1,
+				removed: 1,
+				fuzz: 0,
+			},
+			{
+				operation: "delete",
+				path: "old.txt",
+				targetPath: "old.txt",
+				displayDiff: "-1 gone",
+				added: 0,
+				removed: 1,
+				fuzz: 0,
+			},
+		]);
+		const collapsed = formatPatchResult(result, theme, { expanded: false, keyHint });
+		assert.match(collapsed, /Edited 2 files \(\+1 -2\)/);
+		assert.match(collapsed, /└ M a\.ts \(\+1 -1\)/);
+		assert.match(collapsed, /└ D old\.txt \(\+0 -1\)/);
+		assert.doesNotMatch(collapsed, /-1 old/);
+		assert.match(collapsed, /<app\.tools\.expand> to expand diffs/);
+	});
+
 	it("keeps multi-file diffs collapsed until expanded", () => {
 		const result = details([
 			{
@@ -158,42 +224,17 @@ describe("formatPatchResult", () => {
 			},
 		]);
 		const collapsed = formatPatchResult(result, theme, { expanded: false, keyHint });
+		assert.match(collapsed, /Edited 2 files \(\+2 -1\)/);
+		assert.match(collapsed, /└ M a\.ts/);
+		assert.match(collapsed, /└ A b\.ts/);
 		assert.doesNotMatch(collapsed, /old/);
-		assert.doesNotMatch(collapsed, /└/);
+		assert.doesNotMatch(collapsed, /added/);
 		assert.match(collapsed, /<app\.tools\.expand> to expand diffs/);
 		const expanded = formatPatchResult(result, theme, { expanded: true, keyHint });
+		assert.match(expanded, /Edited 2 files \(\+2 -1\)/);
 		assert.match(expanded, /└ M a\.ts/);
 		assert.match(expanded, /old/);
 		assert.match(expanded, /added/);
-	});
-
-	it("formats the exact summary from executed details", () => {
-		const text = formatPatchSummary(
-			details([
-				{
-					operation: "update",
-					path: "a.ts",
-					targetPath: "a.ts",
-					displayDiff: "-1 old\n+1 new",
-					added: 1,
-					removed: 1,
-					fuzz: 0,
-				},
-				{
-					operation: "delete",
-					path: "old.txt",
-					targetPath: "old.txt",
-					displayDiff: "-1 gone",
-					added: 0,
-					removed: 1,
-					fuzz: 0,
-				},
-			]),
-			theme,
-			{ expanded: false },
-		);
-		assert.match(text, /Edited 2 files \(\+1 -2\)/);
-		assert.match(text, /└ D old\.txt \(\+0 -1\)/);
 	});
 
 	it("renders errors and progress from content", () => {

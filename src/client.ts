@@ -181,7 +181,7 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 		detached: process.platform !== "win32",
 		windowsHide: true,
 	});
-	let spawnError: Error | undefined;
+	let spawnError: (Error & { code?: string }) | undefined;
 	let stderr = "";
 	child.once("error", (error) => {
 		spawnError = error;
@@ -214,7 +214,7 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 		const { value, done } = await output.next();
 		if (done) {
 			const status = await exited;
-			if (spawnError && object(spawnError) && spawnError.code === "ENOENT") {
+			if (spawnError?.code === "ENOENT") {
 				throw new Error(`Cannot start ${binary}. ${coreHelp}`);
 			}
 			throw new Error(
