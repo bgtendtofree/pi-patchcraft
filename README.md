@@ -210,6 +210,15 @@ To measure a one-line update in a 16 MiB file on macOS or Linux, build with
 `cargo build --locked --release` and run `bash scripts/benchmark-core.sh`.
 The script measures the standalone core and the Pi adapter separately.
 
+Tests follow the same ownership boundary:
+
+- `rust/patchcraft-core/tests/` covers core matrices that do not need the Pi host: parsing,
+  matching, transaction preconditions, and filesystem outcomes.
+- `test/apply.test.ts` keeps only the TS client seam: diff frames, Pi mutation queues, abort/close,
+  error mapping, and the mirrored protocol limits.
+- `test/index.test.ts`, `test/render.test.ts`, and `test/preview.test.ts` cover the extension host
+  and TUI contracts.
+
 ## Current compatibility
 
 Development and package smoke tests pin:
