@@ -17,7 +17,16 @@ const maxFrameBytes = 192 * 1024 * 1024;
 
 class CoreRejection extends Error {}
 
-interface PatchPlan extends PatchResultDetails {
+/**
+ * Plan lifecycle: planned → committing → applied|failed, or planned → closed.
+ * `outcome` distinguishes a confirmed failure (no mutation) from an unknown commit outcome.
+ */
+export type PatchPlanPhase = "planned" | "committing" | "applied" | "failed" | "closed";
+export type PatchPlanOutcome = "applied" | "failed" | "unknown";
+
+export interface PatchPlan extends PatchResultDetails {
+	readonly phase: PatchPlanPhase;
+	readonly outcome: PatchPlanOutcome | undefined;
 	apply(signal?: AbortSignal): Promise<void>;
 	close(): Promise<void>;
 }
@@ -197,9 +206,12 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 	});
 	const cancel = () => child.stdin.end();
 	const output = frames(child.stdout.iterator({ destroyOnReturn: false }));
-	let used = false;
+	let phase: PatchPlanPhase = "planned";
+	let outcome: PatchPlanOutcome | undefined;
+	let commitAttempted = false;
 	let closing: Promise<void> | undefined;
 	function close(): Promise<void> {
+		if (phase === "planned") phase = "closed";
 		closing ??= (async () => {
 			cancel();
 			// Drain stdout before waiting so a response in flight can't block exit.
@@ -259,28 +271,52 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 			added: changes.reduce((sum, change) => sum + change.added, 0),
 			removed: changes.reduce((sum, change) => sum + change.removed, 0),
 			fuzz: changes.reduce((sum, change) => sum + change.fuzz, 0),
+			get phase() {
+				return phase;
+			},
+			get outcome() {
+				return outcome;
+			},
 			async apply(signal?: AbortSignal) {
-				if (used || closing) throw new Error("Patchcraft plan is no longer available");
-				used = true;
+				if (phase !== "planned") {
+					const detail = outcome ? `, outcome: ${outcome}` : "";
+					throw new Error(`Patchcraft plan is no longer available (phase: ${phase}${detail})`);
+				}
+				phase = "committing";
 				try {
 					signal?.addEventListener("abort", cancel, { once: true });
 					await withPiQueues(lockPaths, signal, async () => {
 						try {
+							commitAttempted = true;
 							child.stdin.write("commit\n");
 							const result = await next();
 							if (result.status !== "applied" || !(await output.next()).done || (await exited).code !== 0) {
 								throw new Error("patchcraft-core did not acknowledge commit");
 							}
+							phase = "applied";
+							outcome = "applied";
 						} catch (error) {
 							// Don't release Pi's locks until the core finishes any rollback.
 							await close();
-							if (error instanceof CoreRejection && (await exited).code === 1) throw error;
+							if (error instanceof CoreRejection && (await exited).code === 1) {
+								phase = "failed";
+								outcome = "failed";
+								throw error;
+							}
+							phase = "failed";
+							outcome = "unknown";
 							const reason = error instanceof Error ? error.message : String(error);
 							throw new Error(`Patch commit outcome is unknown. Check the affected files before retrying. ${reason}`, {
 								cause: error,
 							});
 						}
 					});
+				} catch (error) {
+					if (phase === "committing") {
+						phase = "failed";
+						outcome = commitAttempted ? "unknown" : "failed";
+					}
+					throw error;
 				} finally {
 					signal?.removeEventListener("abort", cancel);
 					await close();

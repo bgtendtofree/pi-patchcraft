@@ -137,7 +137,7 @@ fn existing_parent(path: &Path) -> Result<&Path> {
     Ok(current)
 }
 
-pub(crate) fn check(paths: impl IntoIterator<Item = PathBuf>) -> Result<()> {
+pub(crate) fn check(paths: impl IntoIterator<Item = (PathBuf, &'static str)>) -> Result<()> {
     check_with(paths, |path| {
         Ok(Sensitivity {
             case_aliases: probe(path, case_variants),
@@ -147,15 +147,23 @@ pub(crate) fn check(paths: impl IntoIterator<Item = PathBuf>) -> Result<()> {
 }
 
 fn check_with(
-    paths: impl IntoIterator<Item = PathBuf>,
+    paths: impl IntoIterator<Item = (PathBuf, &'static str)>,
     mut sensitivity: impl FnMut(&Path) -> Result<Sensitivity>,
 ) -> Result<()> {
-    let paths: HashSet<_> = paths.into_iter().collect();
+    let mut operations = HashMap::new();
+    let paths: HashSet<_> = paths
+        .into_iter()
+        .map(|(path, operation)| {
+            operations.entry(path.clone()).or_insert(operation);
+            path
+        })
+        .collect();
     let mut folded: HashMap<_, Vec<_>> = HashMap::new();
     let mut cache = HashMap::new();
     let conflict = |path: &Path| {
+        let operation = operations.get(path).copied().unwrap_or("operation");
         format!(
-            "Patch contains conflicting operations for {}",
+            "Patch contains conflicting operations for {} ({operation})",
             path.display()
         )
     };
@@ -209,7 +217,7 @@ mod tests {
     fn probes_axes_independently_and_only_for_candidates() {
         let dir = tempfile::tempdir().unwrap();
         let check_names = |names: [&str; 2], case_aliases, normalization_aliases| {
-            check_with(names.map(|name| dir.path().join(name)), |_| {
+            check_with(names.map(|name| (dir.path().join(name), "update")), |_| {
                 Ok(Sensitivity {
                     case_aliases,
                     normalization_aliases,
@@ -241,8 +249,10 @@ mod tests {
         }
         assert!(check_names(["a", "A"], None, Some(false)).is_err());
         assert!(check_names(["café", "cafe\u{301}"], Some(false), None).is_err());
+        let message = check_names(["a", "A"], Some(true), Some(false)).unwrap_err();
+        assert!(message.contains("(update)"), "{message}");
         check_with(
-            ["a", "b", "a.txt", "nested/c"].map(|name| dir.path().join(name)),
+            ["a", "b", "a.txt", "nested/c"].map(|name| (dir.path().join(name), "update")),
             |_| panic!("ordinary paths must not probe their parent"),
         )
         .unwrap();

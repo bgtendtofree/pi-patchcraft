@@ -7,7 +7,9 @@
  * JSON-schema function tool on providers without grammar constrained sampling.
  *
  * Like Codex, the runtime parser is authoritative: this grammar admits some shorthand it
- * rejects (e.g. a move without a chunk). Pi requires exactly one
+ * rejects (e.g. a move without a chunk). Marker spellings are mirrored in `src/patch-format.ts`
+ * and the Rust parser; the grammar string itself stays byte-for-byte upstream.
+ * Pi requires exactly one
  * required string property in the tool parameters (here `patch`), or Pi rejects every request.
  */
 export const APPLY_PATCH_LARK_GRAMMAR = `start: begin_patch hunk+ end_patch

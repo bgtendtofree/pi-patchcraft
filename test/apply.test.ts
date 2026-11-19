@@ -462,7 +462,7 @@ describe("patch planning and application", () => {
 +two
 *** End Patch`,
 			),
-			/conflicting operations.*one \*\*\* Update File: header/,
+			/conflicting operations for .*update\.txt: update then update.*one \*\*\* Update File: header/,
 		);
 		assert.equal(await readFile(path.join(cwd, "update.txt"), "utf8"), "before\n");
 	});
@@ -503,6 +503,8 @@ describe("patch planning and application", () => {
 		);
 		await writeFile(target, "concurrent\n");
 		await assert.rejects(applyPatchPlan(plan), /changed before apply/);
+		assert.equal(plan.phase, "failed");
+		assert.equal(plan.outcome, "failed");
 		assert.equal(await readFile(target, "utf8"), "concurrent\n");
 	});
 
@@ -1166,6 +1168,8 @@ describe("patch planning and application", () => {
 		const controller = new AbortController();
 		controller.abort();
 		await assert.rejects(applyPatchPlan(plan, controller.signal), /abort/i);
+		assert.equal(plan.phase, "failed");
+		assert.equal(plan.outcome, "failed");
 		assert.equal(await readFile(target, "utf8"), "before\n");
 	});
 
@@ -1182,6 +1186,8 @@ describe("patch planning and application", () => {
 			await assert.rejects(stat(target), { code: "ENOENT" });
 		});
 		await rejected;
+		assert.equal(plan.phase, "failed");
+		assert.equal(plan.outcome, "failed");
 		await assert.rejects(stat(target), { code: "ENOENT" });
 	});
 });

@@ -144,7 +144,7 @@ pi -e git:github.com/bgtendtofree/pi-patchcraft
 
 ## Rendering
 
-Patchcraft registers `renderCall` and `renderResult`. The call row previews the request: a Codex-style summary, per-file counters while the patch streams, a multi-file roster, and a bounded glimpse of the focused file once the arguments are complete. When execution starts, a single-file call row keeps its header and counts; a multi-file call row keeps only the tool name, leaving the exact totals, roster, and diffs to the result row. The result row is self-contained: a single-file patch shows its full diff (matching Pi's `edit`), while a multi-file patch shows the exact counts and the roster, plus an expand hint when there are diffs; expanded results add bounded per-file diffs through Pi's native `renderDiff`.
+Patchcraft registers `renderCall` and `renderResult`. The call row previews the request: a Codex-style summary, per-file counters while the patch streams, a multi-file roster, and a bounded glimpse of the focused file once the arguments are complete. Once the arguments are complete it also warns about repeated file headers and move-only, empty, or no-op updates that the core will reject; these warnings are advisory and the Rust parser remains authoritative. When execution starts, a single-file call row keeps its header and counts; a multi-file call row keeps only the tool name, leaving the exact totals, roster, and diffs to the result row. The result row is self-contained: a single-file patch shows its full diff (matching Pi's `edit`), while a multi-file patch shows the exact counts and the roster, plus an expand hint when there are diffs; expanded results add bounded per-file diffs through Pi's native `renderDiff`.
 
 ```text
 apply_patch  Edited src/app.ts (+3 -1)

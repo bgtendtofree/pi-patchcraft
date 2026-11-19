@@ -2,10 +2,17 @@
  * Tolerant scanner for the patch text while it is still streaming.
  *
  * The execution parser rejects incomplete input. This scanner only feeds the TUI, never execution:
- * it ignores malformed lines, caps its work, and coalesces repeated headers for the roster.
+ * it ignores malformed lines, caps its work, and coalesces repeated headers for the roster. Its
+ * warnings are advisory; the Rust parser is still the authority on what will execute.
  */
 
-type PreviewOperation = "add" | "update" | "delete" | "move";
+import {
+	normalizeMarkerLine,
+	PATCH_MARKERS,
+	type PatchOperation,
+	parseFileHeader,
+	parseMoveTarget,
+} from "./patch-format.ts";
 
 type PreviewLineType = "add" | "delete" | "context";
 
@@ -15,7 +22,7 @@ interface PreviewLine {
 }
 
 export interface PreviewFile {
-	operation: PreviewOperation;
+	operation: PatchOperation;
 	path: string;
 	targetPath?: string;
 	added: number;
@@ -23,11 +30,20 @@ export interface PreviewFile {
 	lines: PreviewLine[];
 }
 
+export type PreviewWarningCode = "duplicate-path" | "move-only" | "empty-update" | "no-op-update";
+
+export interface PreviewWarning {
+	code: PreviewWarningCode;
+	path: string;
+	message: string;
+}
+
 export interface PatchPreview {
 	files: PreviewFile[];
 	added: number;
 	removed: number;
 	truncated: boolean;
+	warnings: PreviewWarning[];
 }
 
 const MAX_PREVIEW_CHARS = 256 * 1024;
@@ -35,26 +51,28 @@ const MAX_PREVIEW_FILES = 500;
 const MAX_PREVIEW_LINES = 2000;
 const MAX_PREVIEW_LINES_PER_FILE = 500;
 const MAX_PREVIEW_LINE_CHARS = 200;
-
-const BEGIN = "*** Begin Patch";
-const END = "*** End Patch";
-const ADD = "*** Add File: ";
-const DELETE = "*** Delete File: ";
-const UPDATE = "*** Update File: ";
-const MOVE = "*** Move to: ";
-const END_OF_FILE = "*** End of File";
+const MAX_PREVIEW_WARNINGS = 8;
 
 export function scanPatchPreview(input: string): PatchPreview {
 	const capped = input.length > MAX_PREVIEW_CHARS ? input.slice(0, MAX_PREVIEW_CHARS) : input;
 	const lines = capped.split("\n");
 	const files: PreviewFile[] = [];
 	const byPath = new Map<string, PreviewFile>();
+	const warnings: PreviewWarning[] = [];
+	const warned = new Set<string>();
 	let current: PreviewFile | undefined;
 	let inPatch = false;
 	let truncated = input.length > capped.length;
 	let added = 0;
 	let removed = 0;
 	let storedLines = 0;
+
+	const warn = (code: PreviewWarningCode, path: string, message: string): void => {
+		const key = `${code}:${path}`;
+		if (warned.has(key) || warnings.length >= MAX_PREVIEW_WARNINGS) return;
+		warned.add(key);
+		warnings.push({ code, path, message });
+	};
 
 	const pushLine = (file: PreviewFile, type: PreviewLineType, text: string): void => {
 		if (storedLines >= MAX_PREVIEW_LINES || file.lines.length >= MAX_PREVIEW_LINES_PER_FILE) {
@@ -71,31 +89,32 @@ export function scanPatchPreview(input: string): PatchPreview {
 	for (const raw of lines) {
 		const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
 		if (!inPatch) {
-			if (line === BEGIN) inPatch = true;
+			if (normalizeMarkerLine(line, undefined) === PATCH_MARKERS.begin) inPatch = true;
 			continue;
 		}
-		if (line === END) break;
-		if (line === "" || line === BEGIN || line === END_OF_FILE) continue;
-		if (line.startsWith(MOVE)) {
+		// Match the core's whitespace rules: a leading space inside an open update hunk is a
+		// context line, not a new marker.
+		const marker = normalizeMarkerLine(line, current?.operation);
+		if (marker === PATCH_MARKERS.end) break;
+		if (marker === "" || marker === PATCH_MARKERS.begin || marker === PATCH_MARKERS.endOfFile) continue;
+		const target = parseMoveTarget(marker);
+		if (target !== undefined) {
 			if (current && (current.operation === "update" || current.operation === "move")) {
-				const targetPath = line.slice(MOVE.length).trimEnd();
-				if (targetPath) {
-					current.operation = "move";
-					current.targetPath = targetPath;
-				}
+				current.operation = "move";
+				current.targetPath = target;
 			}
 			continue;
 		}
-		if (line.startsWith(ADD) || line.startsWith(DELETE) || line.startsWith(UPDATE)) {
-			const operation: PreviewOperation = line.startsWith(ADD) ? "add" : line.startsWith(DELETE) ? "delete" : "update";
-			const prefix = operation === "add" ? ADD : operation === "delete" ? DELETE : UPDATE;
-			const path = line.slice(prefix.length).trimEnd();
-			if (!path) {
-				current = undefined;
-				continue;
-			}
+		const header = parseFileHeader(marker);
+		if (header) {
+			const { operation, path } = header;
 			const existing = byPath.get(path);
 			if (existing) {
+				const hint =
+					existing.operation === "update" && operation === "update"
+						? "combine hunks under one *** Update File: header"
+						: "the executor rejects duplicate paths";
+				warn("duplicate-path", path, `repeated ${operation} header for ${path} (first ${existing.operation}); ${hint}`);
 				current = existing;
 				continue;
 			}
@@ -108,7 +127,14 @@ export function scanPatchPreview(input: string): PatchPreview {
 			files.push(current);
 			continue;
 		}
-		if (!current || current.operation === "delete" || line.startsWith("@@")) continue;
+		if (
+			!current ||
+			current.operation === "delete" ||
+			marker === PATCH_MARKERS.emptyContext ||
+			marker.startsWith(PATCH_MARKERS.context)
+		) {
+			continue;
+		}
 		if (current.operation === "add") {
 			if (line.startsWith("+")) {
 				current.added++;
@@ -130,5 +156,25 @@ export function scanPatchPreview(input: string): PatchPreview {
 		}
 	}
 
-	return { files, added, removed, truncated };
+	for (const file of files) {
+		if (file.added !== 0 || file.removed !== 0) continue;
+		if (file.operation === "move") {
+			if (file.lines.length === 0) {
+				warn("move-only", file.path, `move-only update for ${file.path}; add a @@ hunk or the executor rejects it`);
+			}
+			continue;
+		}
+		if (file.operation !== "update") continue;
+		if (file.lines.length === 0) {
+			warn("empty-update", file.path, `update for ${file.path} has no hunk; add a @@ hunk or the executor rejects it`);
+		} else {
+			warn(
+				"no-op-update",
+				file.path,
+				`update for ${file.path} makes no changes; add a + or - line or the executor rejects it`,
+			);
+		}
+	}
+
+	return { files, added, removed, truncated, warnings };
 }

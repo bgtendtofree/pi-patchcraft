@@ -39,6 +39,17 @@ enum Kind {
     Move,
 }
 
+impl Kind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Delete => "delete",
+            Self::Update => "update",
+            Self::Move => "move",
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
@@ -166,18 +177,22 @@ impl Plan {
                         ""
                     };
                     return Err(format!(
-                        "Patch contains conflicting operations for {}{hint}",
-                        candidate.display()
+                        "Patch contains conflicting operations for {}: {} then {}{hint}",
+                        candidate.display(),
+                        previous.label(),
+                        change.summary.operation.label()
                     ));
                 }
             }
             changes.push(change);
         }
-        aliases::check(
-            changes
-                .iter()
-                .flat_map(|change| [change.source.clone(), change.target.clone()]),
-        )?;
+        aliases::check(changes.iter().flat_map(|change| {
+            let operation = change.summary.operation.label();
+            [
+                (change.source.clone(), operation),
+                (change.target.clone(), operation),
+            ]
+        }))?;
         Ok(Self { changes })
     }
 

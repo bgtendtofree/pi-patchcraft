@@ -145,6 +145,30 @@ it("rejects a move to the same file even if its content would change", async () 
 	assert.equal(readFileSync(file, "utf8"), "before\n");
 });
 
+it("tracks plan phase and settled outcome", async () => {
+	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
+	const file = path.join(cwd.path, "phase.txt");
+	writeFileSync(file, "before\n");
+	const plan = await planPatch(
+		cwd.path,
+		"*** Begin Patch\n*** Update File: phase.txt\n@@\n-before\n+after\n*** End Patch",
+	);
+	assert.equal(plan.phase, "planned");
+	assert.equal(plan.outcome, undefined);
+	await plan.apply();
+	assert.equal(plan.phase, "applied");
+	assert.equal(plan.outcome, "applied");
+	await plan.close();
+	assert.equal(plan.phase, "applied");
+	await assert.rejects(plan.apply(), /no longer available \(phase: applied, outcome: applied\)/);
+
+	const closed = await planPatch(cwd.path, "*** Begin Patch\n*** Add File: closed.txt\n+x\n*** End Patch");
+	await closed.close();
+	assert.equal(closed.phase, "closed");
+	assert.equal(closed.outcome, undefined);
+	await assert.rejects(closed.apply(), /no longer available \(phase: closed\)/);
+});
+
 it("reports an unknown outcome if the core exits without acknowledging commit", {
 	skip: process.platform === "win32",
 }, async () => {
@@ -169,7 +193,9 @@ exit 1
 	try {
 		const plan = await planPatch(cwd.path, patch);
 		await assert.rejects(plan.apply(), /commit outcome is unknown.*Check the affected files before retrying/);
-		await assert.rejects(plan.apply(), /no longer available/);
+		assert.equal(plan.phase, "failed");
+		assert.equal(plan.outcome, "unknown");
+		await assert.rejects(plan.apply(), /no longer available \(phase: failed, outcome: unknown\)/);
 		assert.equal(readFileSync(file, "utf8"), "hello\n");
 	} finally {
 		if (saved === undefined) delete process.env.PATCHCRAFT_BIN;
