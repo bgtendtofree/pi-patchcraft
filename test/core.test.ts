@@ -7,21 +7,21 @@ import { createInterface } from "node:readline";
 import { it } from "node:test";
 import { generateDiffString } from "@earendil-works/pi-coding-agent";
 import { planPatch } from "../src/client.ts";
+import { PROTOCOL_VERSION } from "../src/protocol.ts";
 
 const patch = "*** Begin Patch\n*** Add File: fresh.txt\n+hello\n*** End Patch";
 const binary = process.env.PATCHCRAFT_BIN ?? "patchcraft-core";
-const protocol = 4;
 
 it("reports compatibility and applies a patch as a standalone CLI", () => {
 	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
 	const doctor = spawnSync(binary, ["doctor", "--json"], { encoding: "utf8" });
 	assert.equal(doctor.status, 0, doctor.stderr);
 	assert.deepEqual(Object.keys(JSON.parse(doctor.stdout)).sort(), ["protocol", "version"]);
-	assert.equal(JSON.parse(doctor.stdout).protocol, protocol);
+	assert.equal(JSON.parse(doctor.stdout).protocol, PROTOCOL_VERSION);
 	const result = spawnSync(binary, ["apply", "--json"], { cwd: cwd.path, input: patch, encoding: "utf8" });
 	assert.equal(result.status, 0, result.stderr || result.stdout);
 	assert.deepEqual(JSON.parse(result.stdout), {
-		protocol,
+		protocol: PROTOCOL_VERSION,
 		status: "applied",
 		changes: [{ operation: "add", path: "fresh.txt", targetPath: "fresh.txt", fuzz: 0 }],
 	});
@@ -32,11 +32,11 @@ it("rejects incompatible session protocols without writing", () => {
 	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
 	const result = spawnSync(binary, ["session", "--json"], {
 		cwd: cwd.path,
-		input: `${JSON.stringify({ protocol: 3, cwd: cwd.path, patch })}\ncommit\n`,
+		input: `${JSON.stringify({ protocol: PROTOCOL_VERSION - 1, cwd: cwd.path, patch })}\ncommit\n`,
 		encoding: "utf8",
 	});
 	assert.equal(result.status, 1);
-	assert.match(result.stdout, /Unsupported protocol 3/);
+	assert.match(result.stdout, new RegExp(`Unsupported protocol ${PROTOCOL_VERSION - 1}`));
 	assert.equal(existsSync(path.join(cwd.path, "fresh.txt")), false);
 });
 
@@ -44,7 +44,7 @@ it("rejects a session cwd that does not identify the process workspace", () => {
 	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
 	const result = spawnSync(binary, ["session", "--json"], {
 		cwd: cwd.path,
-		input: `${JSON.stringify({ protocol, cwd: path.dirname(cwd.path), patch })}\ncommit\n`,
+		input: `${JSON.stringify({ protocol: PROTOCOL_VERSION, cwd: path.dirname(cwd.path), patch })}\ncommit\n`,
 		encoding: "utf8",
 	});
 	assert.equal(result.status, 1);
@@ -75,7 +75,7 @@ it("uses compact frames only for unambiguous large single-line updates and match
 			child.once("error", reject);
 			child.once("close", resolve);
 		});
-		child.stdin.write(`${JSON.stringify({ protocol, cwd: cwd.path, patch: replacement })}\n`);
+		child.stdin.write(`${JSON.stringify({ protocol: PROTOCOL_VERSION, cwd: cwd.path, patch: replacement })}\n`);
 		let changeFrame: string | undefined;
 		for await (const line of createInterface({ input: child.stdout })) {
 			const frame = JSON.parse(line);
@@ -180,7 +180,7 @@ it("reports an unknown outcome if the core exits without acknowledging commit", 
 		`#!/bin/sh
 read -r request
 printf '%s\\n' '{"status":"change","change":{"operation":"add","path":"fresh.txt","targetPath":"fresh.txt","fuzz":0},"before":"","after":"aGVsbG8K"}'
-printf '%s\\n' '${JSON.stringify({ protocol, status: "planned", lockPaths: [file] })}'
+printf '%s\\n' '${JSON.stringify({ protocol: PROTOCOL_VERSION, status: "planned", lockPaths: [file] })}'
 if read -r command && [ "$command" = commit ]; then
   printf 'hello\\n' > fresh.txt
 fi
@@ -213,7 +213,7 @@ it("EOF discards a plan when the host has not authorized commit", async () => {
 	let planned = false;
 	let error = "";
 	try {
-		child.stdin.write(`${JSON.stringify({ protocol, cwd: cwd.path, patch })}\n`);
+		child.stdin.write(`${JSON.stringify({ protocol: PROTOCOL_VERSION, cwd: cwd.path, patch })}\n`);
 		for await (const line of createInterface({ input: child.stdout })) {
 			const frame = JSON.parse(line);
 			if (frame.status === "planned") {

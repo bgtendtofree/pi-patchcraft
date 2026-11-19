@@ -21,21 +21,21 @@ use ParseError::*;
 
 const ENVIRONMENT_ID_MARKER: &str = "*** Environment ID:";
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default)]
 pub struct StreamingPatchParser {
     line_buffer: String,
     state: StreamingParserState,
     line_number: usize,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default)]
 struct StreamingParserState {
     mode: StreamingParserMode,
     hunks: Vec<Hunk>,
     environment_id: Option<String>,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 enum StreamingParserMode {
     #[default]
     NotStarted,

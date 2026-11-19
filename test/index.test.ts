@@ -14,6 +14,7 @@ import { compile } from "@earendil-works/pi-schema";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
 import piPatchcraft from "../src/index.ts";
+import { PROTOCOL_VERSION } from "../src/protocol.ts";
 import type { PatchResultDetails } from "../src/types.ts";
 
 interface RegisteredTool {
@@ -334,7 +335,11 @@ describe("pi-patchcraft extension", () => {
 		assert.ok(saved);
 		try {
 			const slow = path.join(cwd, "slow-core");
-			await writeFile(slow, `#!/bin/sh\nsleep 0.2\nprintf '%s\\n' '{"protocol":4}'\n`, { mode: 0o755 });
+			await writeFile(
+				slow,
+				`#!/bin/sh\nsleep 0.2\nprintf '%s\\n' '${JSON.stringify({ protocol: PROTOCOL_VERSION })}'\n`,
+				{ mode: 0o755 },
+			);
 			process.env.PATCHCRAFT_BIN = slow;
 			const harness = extensionHarness(["read", "edit", "write", "bash"]);
 			const gpt = { ...harness.context, model: { id: "gpt-5", provider: "openai" } };
@@ -366,7 +371,11 @@ describe("pi-patchcraft extension", () => {
 			assert.equal(harness.notifications.length, 1);
 			assert.match(harness.notifications[0] ?? "", /disabled.*not found/);
 			if (process.platform !== "win32") {
-				await writeFile(missing, `#!/bin/sh\nprintf '%s\\n' '{"protocol":3}'\n`, { mode: 0o755 });
+				await writeFile(
+					missing,
+					`#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ protocol: PROTOCOL_VERSION - 1 })}'\n`,
+					{ mode: 0o755 },
+				);
 				await harness.mode("on");
 				assert.deepEqual(harness.tools, ["read", "edit"]);
 				assert.match(harness.notifications.at(-1) ?? "", /Incompatible patchcraft-core protocol/);

@@ -317,12 +317,15 @@ function textContent(content: readonly TextBlock[]): string {
 		.trim();
 }
 
-export function formatPatchError(content: readonly TextBlock[], theme: RenderTheme): string {
+function formatPatchMessage(content: readonly TextBlock[], theme: RenderTheme, color: "error" | "warning"): string {
 	const text = textContent(content);
-	return text ? theme.fg("error", sanitize(text)) : "";
+	return text ? theme.fg(color, sanitize(text)) : "";
+}
+
+export function formatPatchError(content: readonly TextBlock[], theme: RenderTheme): string {
+	return formatPatchMessage(content, theme, "error");
 }
 
 export function formatPatchProgress(content: readonly TextBlock[], theme: RenderTheme): string {
-	const text = textContent(content);
-	return text ? theme.fg("warning", sanitize(text)) : "";
+	return formatPatchMessage(content, theme, "warning");
 }

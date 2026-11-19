@@ -18,6 +18,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { planPatch as openPlan } from "../src/client.ts";
+import { MAX_SOURCE_BYTES } from "../src/protocol.ts";
 
 const temporaryDirectories: string[] = [];
 const plans: Awaited<ReturnType<typeof openPlan>>[] = [];
@@ -423,7 +424,7 @@ describe("patch planning and application", () => {
 
 		const target = path.join(cwd, "large.txt");
 		await writeFile(target, "value\n");
-		await truncate(target, 64 * 1024 * 1024 + 1);
+		await truncate(target, MAX_SOURCE_BYTES + 1);
 		await assert.rejects(
 			planPatch(cwd, "*** Begin Patch\n*** Update File: large.txt\n@@\n-value\n+changed\n*** End Patch"),
 			/Patch source is too large/,

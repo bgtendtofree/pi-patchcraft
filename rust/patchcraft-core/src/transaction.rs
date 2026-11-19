@@ -85,7 +85,7 @@ impl Change {
     }
 
     fn is_move(&self) -> bool {
-        self.source != self.target
+        matches!(self.summary.operation, Kind::Move)
     }
 
     fn touches(&self) -> impl Iterator<Item = &Path> {

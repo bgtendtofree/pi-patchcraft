@@ -5,15 +5,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { generateDiffString, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { MAX_FRAME_BYTES, PROTOCOL_VERSION } from "./protocol.ts";
 import type { PatchResultChange, PatchResultDetails } from "./types.ts";
 
-const protocol = 4;
 const executable = process.platform === "win32" ? "patchcraft-core.exe" : "patchcraft-core";
 const bundledCore = fileURLToPath(new URL(`../bin/${process.platform}-${process.arch}/${executable}`, import.meta.url));
 const coreHelp = "Install a matching Patchcraft package or put patchcraft-core on PATH (or set PATCHCRAFT_BIN).";
 const executeFile = promisify(execFile);
-// Two base64 snapshots of up to 64 MiB each, plus patch overhead.
-const maxFrameBytes = 192 * 1024 * 1024;
 
 class CoreRejection extends Error {}
 
@@ -49,8 +47,8 @@ export async function checkCore(binary: string, cwd: string): Promise<string | u
 			windowsHide: true,
 		});
 		const result: unknown = JSON.parse(stdout);
-		if (object(result) && result.protocol === protocol) return undefined;
-		return `Incompatible patchcraft-core protocol (expected ${protocol}). ${coreHelp}`;
+		if (object(result) && result.protocol === PROTOCOL_VERSION) return undefined;
+		return `Incompatible patchcraft-core protocol (expected ${PROTOCOL_VERSION}). ${coreHelp}`;
 	} catch (error) {
 		const reason = object(error) && error.code === "ENOENT" ? "not found" : "doctor failed";
 		return `Cannot use ${binary}: ${reason}. ${coreHelp}`;
@@ -67,7 +65,7 @@ async function* frames(stream: AsyncIterable<Buffer>) {
 			const newline = chunk.indexOf(10, start);
 			const end = newline < 0 ? chunk.length : newline;
 			size += end - start;
-			if (size > maxFrameBytes) throw new Error("patchcraft-core response frame is too large");
+			if (size > MAX_FRAME_BYTES) throw new Error("patchcraft-core response frame is too large");
 			parts.push(chunk.subarray(start, end));
 			start = end + 1;
 			if (newline >= 0) {
@@ -234,9 +232,9 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 					`patchcraft-core exited (${status.signal ?? status.code}) without a result. ${stderr}`.trim(),
 			);
 		}
-		if (value.status !== "change" && value.protocol !== protocol) {
+		if (value.status !== "change" && value.protocol !== PROTOCOL_VERSION) {
 			throw new Error(
-				`Incompatible patchcraft-core protocol; expected ${protocol}. Install matching Pi and core releases.`,
+				`Incompatible patchcraft-core protocol; expected ${PROTOCOL_VERSION}. Install matching Pi and core releases.`,
 			);
 		}
 		if (value.status === "error" && typeof value.message === "string") {
@@ -247,7 +245,7 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 
 	try {
 		signal?.addEventListener("abort", cancel, { once: true });
-		child.stdin.write(`${JSON.stringify({ protocol, cwd: path.resolve(cwd), patch })}\n`);
+		child.stdin.write(`${JSON.stringify({ protocol: PROTOCOL_VERSION, cwd: path.resolve(cwd), patch })}\n`);
 		const changes: PatchResultChange[] = [];
 		let response = await next();
 		while (response.status === "change") {
