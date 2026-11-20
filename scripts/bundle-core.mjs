@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const target = process.env.CARGO_TARGET_DIR ?? path.join(root, "target");
-const executable = process.platform === "win32" ? "patchcraft-core.exe" : "patchcraft-core";
+const executable = "patchcraft-core";
 const directory = path.join(root, "bin", `${process.platform}-${process.arch}`);
 mkdirSync(directory, { recursive: true });
 const binary = path.join(directory, executable);

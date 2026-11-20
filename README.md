@@ -76,7 +76,7 @@ Patchcraft defaults to automatic mode: `gpt-*` models receive `apply_patch` in p
 
 Mode changes persist in current session across reloads, resumes, and tree navigation. New sessions default to `auto`.
 
-Before enabling `apply_patch`, Patchcraft checks the core's protocol. If the core is missing or incompatible, your baseline editing tools stay available, even when `on` was requested. `/patchcraft` shows the reason. After fixing the install, reselect `auto` or `on`, or `/reload`.
+Before enabling `apply_patch`, Patchcraft checks the core's protocol before each turn that would use it. If the core is missing or incompatible, your baseline editing tools stay available, even when `on` was requested. `/patchcraft` shows the reason. Fixing the install takes effect on the next turn; no reselect or `/reload` is needed.
 
 Before changing tools, Patchcraft saves the active-tool baseline as session metadata. Reloads, resumes, tree navigation, and forks restore it from the active branch. Only `edit` and `write` that were enabled in that baseline are restored; other tools retain their current enabled/disabled state. New sessions capture their own baseline.
 
@@ -107,13 +107,14 @@ Rollback also removes empty directories created by the patch; it never recursive
 
 ## Install
 
-Release tarballs bundle a matching core for macOS arm64 and Linux x64. These
-packages need no Rust toolchain or install script. If published to npm, install
+Supported platforms are macOS (arm64) and Linux (x64); Windows is not supported.
+Release tarballs bundle a matching core for both. These packages need no Rust
+toolchain or install script. If published to npm, install
 the package with `pi install npm:@bgtendtofree/pi-patchcraft`. You can also
 extract the `.tgz` from a GitHub Release and run `pi install /absolute/path/to/package`.
 
-For a Git checkout or another platform, build the matching CLI from the same
-checkout:
+For a Git checkout or another Unix-like platform, build the matching core from the
+same checkout:
 
 ```bash
 cargo install --locked --path rust/patchcraft-core

@@ -1,5 +1,5 @@
 use std::io::{self, BufRead, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, mpsc};
 
@@ -109,28 +109,6 @@ fn session(cancelled: Arc<Cancelled>) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn standalone(cwd: &Path, cancelled: &Cancelled) -> Result<(), String> {
-    let mut bytes = Vec::new();
-    io::stdin()
-        .take(MAX_PATCH_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    if bytes.len() > MAX_PATCH_BYTES {
-        return Err("Patch is too large: exceeds 1 MiB limit".into());
-    }
-    let patch = std::str::from_utf8(&bytes).map_err(|_| "Patch is not valid UTF-8")?;
-    let plan = Plan::build_with_cancel(cwd, patch, cancelled)?;
-    let result = serde_json::to_value(
-        plan.changes()
-            .iter()
-            .map(|change| change.summary())
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|error| error.to_string())?;
-    plan.apply(cancelled)?;
-    send(&json!({ "protocol": PROTOCOL_VERSION, "status": "applied", "changes": result }))
-}
-
 fn run() -> Result<ExitCode, String> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args == ["doctor", "--json"] {
@@ -139,19 +117,13 @@ fn run() -> Result<ExitCode, String> {
         )
         .map(|()| ExitCode::SUCCESS);
     }
-    let standalone_mode = args == ["apply", "--json"];
-    if !standalone_mode && args != ["session", "--json"] {
-        return Err("Usage: patchcraft-core doctor --json | apply --json | session --json".into());
+    if args != ["session", "--json"] {
+        return Err("Usage: patchcraft-core doctor --json | session --json".into());
     }
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
     let cancelled: Arc<Cancelled> = Arc::default();
     let signal = cancelled.clone();
     ctrlc::set_handler(move || signal.cancel()).map_err(|error| error.to_string())?;
-    if standalone_mode {
-        standalone(&cwd, &cancelled).map(|()| ExitCode::SUCCESS)
-    } else {
-        session(cancelled)
-    }
+    session(cancelled)
 }
 
 fn main() -> ExitCode {

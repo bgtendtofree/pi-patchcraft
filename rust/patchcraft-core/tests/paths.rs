@@ -2,14 +2,11 @@
 
 use std::fs;
 
-#[cfg(unix)]
 use std::os::unix::fs::symlink;
-#[cfg(unix)]
 use std::path::Path;
 
 mod common;
 use common::{apply, plan, read, workspace, write};
-#[cfg(unix)]
 use common::{apply_error, plan_error};
 
 #[test]
@@ -29,7 +26,6 @@ fn supports_absolute_and_parent_paths() {
     assert_eq!(read(root.path(), "parent.txt"), "parent\n");
 }
 
-#[cfg(unix)]
 #[test]
 fn supports_symlinked_directory_paths() {
     let root = workspace();
@@ -48,7 +44,6 @@ fn supports_symlinked_directory_paths() {
     assert_eq!(read(&outside, "symlink.txt"), "symlink\n");
 }
 
-#[cfg(unix)]
 #[test]
 fn rejects_the_same_file_through_a_symlinked_parent() {
     let cwd = workspace();
@@ -62,7 +57,6 @@ fn rejects_the_same_file_through_a_symlinked_parent() {
     assert!(!cwd.path().join("real/nested/new.txt").exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn follows_file_symlinks_for_add_and_update() {
     let cwd = workspace();
@@ -105,7 +99,6 @@ fn follows_file_symlinks_for_add_and_update() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn creates_the_target_of_a_dangling_file_symlink_on_add() {
     let cwd = workspace();
@@ -131,7 +124,6 @@ fn creates_the_target_of_a_dangling_file_symlink_on_add() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn resolves_dotdot_in_a_symlink_target_against_the_real_chain() {
     let cwd = workspace();
@@ -159,7 +151,6 @@ fn resolves_dotdot_in_a_symlink_target_against_the_real_chain() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn rejects_a_symlink_target_through_a_non_directory() {
     let cwd = workspace();
@@ -177,7 +168,6 @@ fn rejects_a_symlink_target_through_a_non_directory() {
     assert_eq!(read(cwd.path(), "target.txt"), "old\n");
 }
 
-#[cfg(unix)]
 #[test]
 fn rejects_a_regular_file_symlink_target_ending_in_a_slash() {
     let cwd = workspace();
@@ -194,7 +184,6 @@ fn rejects_a_regular_file_symlink_target_ending_in_a_slash() {
     assert_eq!(read(cwd.path(), "target.txt"), "old\n");
 }
 
-#[cfg(unix)]
 #[test]
 fn rejects_a_dangling_symlink_target_that_requires_a_directory() {
     let cwd = workspace();
@@ -207,7 +196,6 @@ fn rejects_a_dangling_symlink_target_that_requires_a_directory() {
     assert!(!cwd.path().join("missing").exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn rejects_dotdot_after_a_missing_symlink_component() {
     let cwd = workspace();
@@ -221,7 +209,6 @@ fn rejects_dotdot_after_a_missing_symlink_component() {
     assert!(!cwd.path().join("missing").exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn rejects_conflicts_through_a_dangling_link_under_a_symlinked_parent() {
     let cwd = workspace();
@@ -256,7 +243,6 @@ fn rejects_conflicts_through_a_dangling_link_under_a_symlinked_parent() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn refuses_delete_and_move_through_a_file_symlink() {
     let cwd = workspace();
@@ -289,7 +275,6 @@ fn refuses_delete_and_move_through_a_file_symlink() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn rejects_a_file_symlink_retargeted_between_planning_and_apply() {
     let cwd = workspace();

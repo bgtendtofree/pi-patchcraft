@@ -1,3 +1,6 @@
+#[cfg(not(unix))]
+compile_error!("patchcraft-core supports Unix-like systems only");
+
 mod aliases;
 mod file_update;
 mod parser;

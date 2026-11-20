@@ -152,34 +152,35 @@ function appendGlimpse(
 	}
 }
 
-interface CallPreviewOptions {
-	expanded: boolean;
-	argsComplete: boolean;
-	executionStarted: boolean;
-}
+/** streaming: arguments are still arriving; ready: arguments are complete; running: execution has started. */
+export type CallPhase = "streaming" | "ready" | "running";
 
-function formatCallPreview(preview: PatchPreview, theme: RenderTheme, options: CallPreviewOptions): string {
+export function formatPatchCall(
+	preview: PatchPreview,
+	theme: RenderTheme,
+	options: { expanded: boolean; phase: CallPhase },
+): string {
 	if (preview.files.length === 0) return title(theme);
 	if (preview.files.length === 1) {
 		const file = preview.files[0] as PreviewFile;
 		const lines = [singleHeader(file, theme)];
-		if (options.argsComplete && !options.executionStarted) {
+		if (options.phase === "ready") {
 			appendGlimpse(lines, file, theme, options.expanded, "  ");
 		}
-		if (preview.truncated && !options.executionStarted) {
+		if (preview.truncated && options.phase !== "running") {
 			lines.push(`  ${theme.fg("muted", "(large patch; preview truncated)")}`);
 		}
 		return lines.join("\n");
 	}
 
 	// Once execution starts, the result row owns the summary, roster, and exact counts.
-	if (options.executionStarted) return title(theme);
+	if (options.phase === "running") return title(theme);
 	// Delete counts are only known after reading the source, so omit uncertain totals from the preview.
 	const showCounts = preview.files.every((file) => file.operation !== "delete");
 	const lines = [`${title(theme)}  ${multiSummary(preview.files, preview.added, preview.removed, theme, showCounts)}`];
 	const max = options.expanded ? MAX_ROSTER_EXPANDED : MAX_ROSTER_COLLAPSED;
 	const visible = preview.files.slice(0, max);
-	const focus = options.argsComplete ? focusFile(visible) : undefined;
+	const focus = options.phase === "ready" ? focusFile(visible) : undefined;
 	for (const file of visible) {
 		lines.push(rosterLine(file, theme));
 		if (file === focus) appendGlimpse(lines, file, theme, options.expanded, "    ");
@@ -188,18 +189,6 @@ function formatCallPreview(preview: PatchPreview, theme: RenderTheme, options: C
 	if (hidden > 0) lines.push(hiddenFiles(hidden, theme));
 	if (preview.truncated) lines.push(`  ${theme.fg("muted", "(large patch; preview truncated)")}`);
 	return lines.join("\n");
-}
-
-export function formatPatchCall(
-	preview: PatchPreview,
-	theme: RenderTheme,
-	options: { expanded: boolean; argsComplete: boolean; executionStarted?: boolean },
-): string {
-	return formatCallPreview(preview, theme, {
-		expanded: options.expanded,
-		argsComplete: options.argsComplete,
-		executionStarted: options.executionStarted ?? false,
-	});
 }
 
 interface RenderedDiff {
@@ -284,7 +273,6 @@ export function formatPatchResult(
 	theme: RenderTheme,
 	options: { expanded: boolean; keyHint: KeyHint },
 ): string {
-	if (details.changes.length === 0) return "";
 	if (details.changes.length === 1) return formatSingleResult(details.changes[0] as PatchResultChange);
 	return formatMultiResult(details, theme, options.expanded, options.keyHint);
 }

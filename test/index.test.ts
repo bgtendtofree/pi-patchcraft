@@ -313,7 +313,6 @@ describe("pi-patchcraft extension", () => {
 	});
 
 	it("applies queued loadout syncs in event order", async () => {
-		if (process.platform === "win32") return;
 		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-queue-"));
 		temporaryDirectories.push(cwd);
 		const saved = process.env.PATCHCRAFT_BIN;
@@ -355,19 +354,39 @@ describe("pi-patchcraft extension", () => {
 			assert.deepEqual(harness.tools, ["read", "edit"]);
 			assert.equal(harness.notifications.length, 1);
 			assert.match(harness.notifications[0] ?? "", /disabled.*not found/);
-			if (process.platform !== "win32") {
-				await writeFile(
-					missing,
-					`#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ protocol: PROTOCOL_VERSION - 1 })}'\n`,
-					{ mode: 0o755 },
-				);
-				await harness.mode("on");
-				assert.deepEqual(harness.tools, ["read", "edit"]);
-				assert.match(harness.notifications.at(-1) ?? "", /Incompatible patchcraft-core protocol/);
-			}
+			await writeFile(missing, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ protocol: PROTOCOL_VERSION - 1 })}'\n`, {
+				mode: 0o755,
+			});
+			await harness.mode("on");
+			assert.deepEqual(harness.tools, ["read", "edit"]);
+			assert.match(harness.notifications.at(-1) ?? "", /Incompatible patchcraft-core protocol/);
 			process.env.PATCHCRAFT_BIN = saved;
 			await harness.mode("auto");
 			assert.deepEqual(harness.tools, ["read", "apply_patch"]);
+		} finally {
+			process.env.PATCHCRAFT_BIN = saved;
+		}
+	});
+
+	it("applies an installed core on the next turn without reselecting the mode", async () => {
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-recheck-"));
+		temporaryDirectories.push(cwd);
+		const saved = process.env.PATCHCRAFT_BIN;
+		assert.ok(saved);
+		try {
+			const core = path.join(cwd, "patchcraft-core");
+			process.env.PATCHCRAFT_BIN = core;
+			const harness = extensionHarness(["read", "edit"]);
+			await harness.emit("session_start");
+			assert.deepEqual(harness.tools, ["read", "edit"]);
+			assert.equal(harness.notifications.length, 1);
+
+			await writeFile(core, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ protocol: PROTOCOL_VERSION })}'\n`, {
+				mode: 0o755,
+			});
+			await harness.emit("before_agent_start");
+			assert.deepEqual(harness.tools, ["read", "apply_patch"]);
+			assert.equal(harness.notifications.length, 1);
 		} finally {
 			process.env.PATCHCRAFT_BIN = saved;
 		}
@@ -581,6 +600,24 @@ describe("pi-patchcraft extension", () => {
 			{ isError: true, lastComponent: undefined, keyHint: renderKeyHint },
 		);
 		assert.ok(error);
+	});
+
+	it("renders progress rows while the patch is validated and applied", () => {
+		const { tool } = extensionHarness([]);
+		const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+		const render = (content: Array<{ type: string; text: string }>) => {
+			const rendered = (
+				tool.renderResult as (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown
+			)({ content, details: undefined }, { expanded: false, isPartial: true }, theme, {
+				isError: false,
+				lastComponent: undefined,
+			});
+			return stripTerminalSequences((rendered as { render(width: number): string[] }).render(80).join("\n"));
+		};
+		assert.match(render([{ type: "text", text: "Validating patch…" }]), /Validating patch…/);
+		assert.match(render([{ type: "text", text: "Applying patch to 2 file(s)…" }]), /Applying patch to 2 file\(s\)…/);
+		// Without progress text, the row still says what is happening.
+		assert.match(render([]), /Applying patch…/);
 	});
 
 	it("declares grammar constrained sampling for capable models", () => {

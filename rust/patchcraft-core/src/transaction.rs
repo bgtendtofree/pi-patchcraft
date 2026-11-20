@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, Metadata, Permissions};
 use std::io::{self, Read, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -118,12 +119,9 @@ fn read_file(path: &Path, metadata: &Metadata) -> Result<Vec<u8>> {
     }
     // Don't follow a new final symlink or block on a FIFO substituted between stat and open.
     let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
+    options
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     let file = options.open(path).map_err(|error| io_error(path, error))?;
     if !file
         .metadata()
@@ -322,8 +320,8 @@ impl Plan {
 
 fn build_change(cwd: &Path, op: Hunk) -> Result<Change> {
     let (kind, path, move_to) = match &op {
-        Hunk::AddFile { path, .. } => (Kind::Add, path, None),
-        Hunk::DeleteFile { path } => (Kind::Delete, path, None),
+        Hunk::AddFile { path, .. } => (Kind::Add, path.as_str(), None),
+        Hunk::DeleteFile { path } => (Kind::Delete, path.as_str(), None),
         Hunk::UpdateFile {
             path, move_path, ..
         } => (
@@ -332,13 +330,11 @@ fn build_change(cwd: &Path, op: Hunk) -> Result<Change> {
             } else {
                 Kind::Update
             },
-            path,
+            path.as_str(),
             move_path.as_deref(),
         ),
     };
-    // The parser constructs these paths from UTF-8; resolve them with Pi's path rules.
-    let path = crate::paths::wire_path(path)?;
-    let move_to = move_to.map(crate::paths::wire_path).transpose()?;
+    // Hunk paths are patch text; resolve them with Pi's path rules.
     let lexical = lexical_path(cwd, path)?;
     let absolute = resolve_parent(&lexical)?;
     let resolved = resolve_links(&absolute)?;
@@ -416,18 +412,10 @@ fn build_change(cwd: &Path, op: Hunk) -> Result<Change> {
     })
 }
 
-#[cfg(unix)]
 fn same_mode(a: &Permissions, b: &Permissions) -> bool {
-    use std::os::unix::fs::PermissionsExt;
     a.mode() & 0o7777 == b.mode() & 0o7777
 }
 
-#[cfg(not(unix))]
-fn same_mode(a: &Permissions, b: &Permissions) -> bool {
-    a.readonly() == b.readonly()
-}
-
-#[cfg(unix)]
 fn assert_replaceable(path: &Path) -> io::Result<()> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
@@ -438,11 +426,6 @@ fn assert_replaceable(path: &Path) -> io::Result<()> {
     } else {
         Err(io::Error::last_os_error())
     }
-}
-
-#[cfg(not(unix))]
-fn assert_replaceable(path: &Path) -> io::Result<()> {
-    fs::OpenOptions::new().write(true).open(path).map(drop)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -488,13 +471,9 @@ fn atomic_write(
     create_parents(parent(path), directories)?;
     let mut builder = tempfile::Builder::new();
     builder.prefix(".patchcraft-").suffix(".tmp");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        builder.permissions(Permissions::from_mode(
-            permissions.map_or(0o666, PermissionsExt::mode),
-        ));
-    }
+    builder.permissions(Permissions::from_mode(
+        permissions.map_or(0o666, PermissionsExt::mode),
+    ));
     let mut temp = builder
         .tempfile_in(parent(path))
         .map_err(|error| io_error(path, error))?;

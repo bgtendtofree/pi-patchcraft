@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+
+use patchcraft_core::{Cancelled, Plan};
 
 type Snapshot = BTreeMap<PathBuf, Option<Vec<u8>>>;
 
@@ -46,39 +47,29 @@ fn runs_codex_scenarios_with_transactional_exceptions() {
                 None => fs::create_dir(dest).unwrap(),
             }
         }
-        let output = Command::new(env!("CARGO_BIN_EXE_patchcraft-core"))
-            .args(["apply", "--json"])
-            .current_dir(dir.path())
-            .stdin(Stdio::from(fs::File::open(case.join("patch.txt")).unwrap()))
-            .output()
-            .unwrap();
-        let json: serde_json::Value =
-            serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-                panic!(
-                    "{name}: {error}; stderr: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                )
-            });
+        let patch = fs::read_to_string(case.join("patch.txt")).unwrap();
+        let outcome = Plan::build_with_cancel(dir.path(), &patch, &Cancelled::default())
+            .and_then(|plan| plan.apply(&Cancelled::default()));
 
         let expected = match name {
             // Patchcraft refuses to overwrite move destinations and preflights the whole
             // envelope instead of leaving partially committed changes on failure.
             "010_move_overwrites_existing_destination" => {
+                let error = outcome.as_ref().unwrap_err();
                 assert!(
-                    json["message"]
-                        .as_str()
-                        .unwrap()
-                        .contains("Move target already exists")
+                    error.contains("Move target already exists"),
+                    "{name}: {error}"
                 );
                 input.clone()
             }
             "015_failure_after_partial_success_leaves_changes" => {
-                assert!(json["message"].as_str().unwrap().contains("does not exist"));
+                let error = outcome.as_ref().unwrap_err();
+                assert!(error.contains("does not exist"), "{name}: {error}");
                 input.clone()
             }
             _ => snapshot(&case.join("expected")),
         };
-        assert_eq!(output.status.success(), input != expected, "{name}: {json}");
-        assert_eq!(snapshot(dir.path()), expected, "{name}: {json}");
+        assert_eq!(outcome.is_ok(), input != expected, "{name}: {outcome:?}");
+        assert_eq!(snapshot(dir.path()), expected, "{name}: {outcome:?}");
     }
 }

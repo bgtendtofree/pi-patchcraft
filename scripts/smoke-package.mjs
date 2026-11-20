@@ -48,8 +48,7 @@ import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 // Deliberately do not allow an external core (including the test override).
 delete process.env.PATCHCRAFT_BIN;
 process.env.PATH = "";
-const executable = process.platform === "win32" ? "patchcraft-core.exe" : "patchcraft-core";
-await access(join(process.argv[1], "bin", \`\${process.platform}-\${process.arch}\`, executable), constants.X_OK);
+await access(join(process.argv[1], "bin", \`\${process.platform}-\${process.arch}\`, "patchcraft-core"), constants.X_OK);
 const result = await discoverAndLoadExtensions([process.argv[1]], process.cwd(), "./agent");
 assert.deepEqual(result.errors, []);
 assert.equal(result.extensions.length, ${manifest.pi.extensions.length});

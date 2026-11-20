@@ -34,7 +34,7 @@ describe("formatPatchCall", () => {
 	it("shows a single-file summary with counts", () => {
 		const preview = scanPatchPreview("*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new");
 		assert.equal(
-			formatPatchCall(preview, theme, { expanded: false, argsComplete: false }),
+			formatPatchCall(preview, theme, { expanded: false, phase: "streaming" }),
 			"apply_patch  Edited src/app.ts (+1 -1)",
 		);
 	});
@@ -43,7 +43,7 @@ describe("formatPatchCall", () => {
 		const preview = scanPatchPreview(
 			"*** Begin Patch\n*** Update File: a.ts\n@@\n-old\n+new\n*** Add File: b.ts\n+one\n+two",
 		);
-		const text = formatPatchCall(preview, theme, { expanded: false, argsComplete: false });
+		const text = formatPatchCall(preview, theme, { expanded: false, phase: "streaming" });
 		assert.match(text, /apply_patch {2}Edited 2 files \(\+3 -1\)/);
 		assert.match(text, /└ M a\.ts \(\+1 -1\)/);
 		assert.match(text, /└ A b\.ts \(\+2 -0\)/);
@@ -54,7 +54,7 @@ describe("formatPatchCall", () => {
 		const preview = scanPatchPreview(
 			"*** Begin Patch\n*** Update File: a.ts\n@@\n-old\n+new\n*** Add File: b.ts\n+one",
 		);
-		const text = formatPatchCall(preview, theme, { expanded: true, argsComplete: false });
+		const text = formatPatchCall(preview, theme, { expanded: true, phase: "streaming" });
 		assert.match(text, /Edited 2 files/);
 		assert.match(text, /└ M a\.ts/);
 		assert.match(text, /└ A b\.ts/);
@@ -62,9 +62,9 @@ describe("formatPatchCall", () => {
 
 	it("adds a glimpse only after the arguments are complete", () => {
 		const preview = scanPatchPreview("*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new");
-		const streaming = formatPatchCall(preview, theme, { expanded: false, argsComplete: false });
+		const streaming = formatPatchCall(preview, theme, { expanded: false, phase: "streaming" });
 		assert.doesNotMatch(streaming, /\+new/);
-		const complete = formatPatchCall(preview, theme, { expanded: false, argsComplete: true });
+		const complete = formatPatchCall(preview, theme, { expanded: false, phase: "ready" });
 		assert.match(complete, /-old/);
 		assert.match(complete, /\+new/);
 	});
@@ -73,7 +73,7 @@ describe("formatPatchCall", () => {
 		const preview = scanPatchPreview(
 			"*** Begin Patch\n*** Update File: a.ts\n@@\n-old\n+new\n*** Add File: b.ts\n+one",
 		);
-		const text = formatPatchCall(preview, theme, { expanded: false, argsComplete: true });
+		const text = formatPatchCall(preview, theme, { expanded: false, phase: "ready" });
 		assert.ok(text.indexOf("+one") > text.indexOf("└ A b.ts"));
 		assert.doesNotMatch(text, /-old/);
 	});
@@ -82,13 +82,12 @@ describe("formatPatchCall", () => {
 		const preview = scanPatchPreview(
 			"*** Begin Patch\n*** Update File: a.ts\n@@\n-old\n+new\n*** Add File: b.ts\n+one",
 		);
-		const before = formatPatchCall(preview, theme, { expanded: false, argsComplete: true });
+		const before = formatPatchCall(preview, theme, { expanded: false, phase: "ready" });
 		assert.match(before, /└ M a\.ts/);
 		assert.match(before, /\+one/);
 		const after = formatPatchCall(preview, theme, {
 			expanded: false,
-			argsComplete: true,
-			executionStarted: true,
+			phase: "running",
 		});
 		assert.equal(after, "apply_patch");
 	});
@@ -97,8 +96,7 @@ describe("formatPatchCall", () => {
 		const preview = scanPatchPreview("*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new");
 		const after = formatPatchCall(preview, theme, {
 			expanded: false,
-			argsComplete: true,
-			executionStarted: true,
+			phase: "running",
 		});
 		assert.equal(after, "apply_patch  Edited src/app.ts (+1 -1)");
 	});
@@ -107,24 +105,36 @@ describe("formatPatchCall", () => {
 		const preview = scanPatchPreview(
 			"*** Begin Patch\n*** Update File: a.ts\n*** Move to: b.ts\n*** Update File: c.ts\n*** Move to: d.ts",
 		);
-		assert.match(formatPatchCall(preview, theme, { expanded: false, argsComplete: false }), /Moved 2 files/);
+		assert.match(formatPatchCall(preview, theme, { expanded: false, phase: "streaming" }), /Moved 2 files/);
 	});
 
 	it("omits uncertain delete totals from the multi-file call preview", () => {
 		const preview = scanPatchPreview("*** Begin Patch\n*** Delete File: a.txt\n*** Update File: b.ts\n@@\n-x\n+y");
-		const [header] = formatPatchCall(preview, theme, { expanded: false, argsComplete: false }).split("\n");
+		const [header] = formatPatchCall(preview, theme, { expanded: false, phase: "streaming" }).split("\n");
 		assert.equal(header, "apply_patch  Edited 2 files");
+	});
+
+	it("summarises the roster beyond the collapsed limit", () => {
+		const patch = [
+			"*** Begin Patch",
+			...Array.from({ length: 12 }, (_, index) => `*** Add File: f${index + 1}.txt\n+x`),
+			"*** End Patch",
+		].join("\n");
+		const text = formatPatchCall(scanPatchPreview(patch), theme, { expanded: false, phase: "streaming" });
+		assert.match(text, /└ A f10\.txt/);
+		assert.doesNotMatch(text, /f11\.txt/);
+		assert.match(text, /… 2 more files/);
 	});
 
 	it("labels rename-only moves and deletes", () => {
 		const move = scanPatchPreview("*** Begin Patch\n*** Update File: old.rs\n*** Move to: new.rs");
 		assert.equal(
-			formatPatchCall(move, theme, { expanded: false, argsComplete: false }),
+			formatPatchCall(move, theme, { expanded: false, phase: "streaming" }),
 			"apply_patch  Moved old.rs → new.rs",
 		);
 		const remove = scanPatchPreview("*** Begin Patch\n*** Delete File: old.txt");
 		assert.equal(
-			formatPatchCall(remove, theme, { expanded: false, argsComplete: false }),
+			formatPatchCall(remove, theme, { expanded: false, phase: "streaming" }),
 			"apply_patch  Deleted old.txt",
 		);
 	});
@@ -235,6 +245,43 @@ describe("formatPatchResult", () => {
 		assert.match(expanded, /└ M a\.ts/);
 		assert.match(expanded, /old/);
 		assert.match(expanded, /added/);
+	});
+
+	it("summarises results beyond the collapsed roster", () => {
+		const changes = Array.from({ length: 12 }, (_, index) => ({
+			operation: "add" as const,
+			path: `f${index + 1}.txt`,
+			targetPath: `f${index + 1}.txt`,
+			displayDiff: "+1 x",
+			added: 1,
+			removed: 0,
+			fuzz: 0,
+		}));
+		const text = formatPatchResult(details(changes), theme, { expanded: false, keyHint });
+		assert.match(text, /Added 12 files \(\+12 -0\)/);
+		assert.match(text, /… 2 more files/);
+		assert.doesNotMatch(text, /f11\.txt/);
+	});
+
+	it("bounds expanded diffs per file and in total", () => {
+		// 5 files of 600 lines: each file shows at most 500 lines, and the total budget of 2000 lines is
+		// spent by the first four, so the fifth keeps only its roster row.
+		const changes = Array.from({ length: 5 }, (_, file) => ({
+			operation: "add" as const,
+			path: `f${file + 1}.txt`,
+			targetPath: `f${file + 1}.txt`,
+			displayDiff: Array.from({ length: 600 }, (_, line) => `+${line + 1} f${file + 1}-${line + 1}`).join("\n"),
+			added: 600,
+			removed: 0,
+			fuzz: 0,
+		}));
+		const text = formatPatchResult(details(changes), theme, { expanded: true, keyHint });
+		assert.match(text, /f1-500\b/);
+		assert.doesNotMatch(text, /f1-501\b/);
+		assert.match(text, /f4-500\b/);
+		assert.match(text, /└ A f5\.txt/);
+		assert.doesNotMatch(text, /f5-1\b/);
+		assert.match(text, /… output truncated/);
 	});
 
 	it("renders errors and progress from content", () => {

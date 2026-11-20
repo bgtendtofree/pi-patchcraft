@@ -12,20 +12,11 @@ import { PROTOCOL_VERSION } from "../src/protocol.ts";
 const patch = "*** Begin Patch\n*** Add File: fresh.txt\n+hello\n*** End Patch";
 const binary = process.env.PATCHCRAFT_BIN ?? "patchcraft-core";
 
-it("reports compatibility and applies a patch as a standalone CLI", () => {
-	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
+it("reports compatibility", () => {
 	const doctor = spawnSync(binary, ["doctor", "--json"], { encoding: "utf8" });
 	assert.equal(doctor.status, 0, doctor.stderr);
 	assert.deepEqual(Object.keys(JSON.parse(doctor.stdout)).sort(), ["protocol", "version"]);
 	assert.equal(JSON.parse(doctor.stdout).protocol, PROTOCOL_VERSION);
-	const result = spawnSync(binary, ["apply", "--json"], { cwd: cwd.path, input: patch, encoding: "utf8" });
-	assert.equal(result.status, 0, result.stderr || result.stdout);
-	assert.deepEqual(JSON.parse(result.stdout), {
-		protocol: PROTOCOL_VERSION,
-		status: "applied",
-		changes: [{ operation: "add", path: "fresh.txt", targetPath: "fresh.txt", fuzz: 0 }],
-	});
-	assert.equal(readFileSync(path.join(cwd.path, "fresh.txt"), "utf8"), "hello\n");
 });
 
 it("rejects incompatible session protocols without writing", () => {
@@ -127,9 +118,7 @@ it("tracks plan phase and settled outcome", async () => {
 	await assert.rejects(closed.apply(), /no longer available \(phase: closed\)/);
 });
 
-it("reports an unknown outcome if the core exits without acknowledging commit", {
-	skip: process.platform === "win32",
-}, async () => {
+it("reports an unknown outcome if the core exits without acknowledging commit", async () => {
 	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
 	const fake = path.join(cwd.path, "fake-core");
 	const file = path.join(cwd.path, "fresh.txt");

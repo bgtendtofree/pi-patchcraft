@@ -8,7 +8,7 @@ import { generateDiffString, withFileMutationQueue } from "@earendil-works/pi-co
 import { MAX_FRAME_BYTES, PROTOCOL_VERSION } from "./protocol.ts";
 import type { PatchResultChange, PatchResultDetails } from "./types.ts";
 
-const executable = process.platform === "win32" ? "patchcraft-core.exe" : "patchcraft-core";
+const executable = "patchcraft-core";
 const bundledCore = fileURLToPath(new URL(`../bin/${process.platform}-${process.arch}/${executable}`, import.meta.url));
 const coreHelp = "Install a matching Patchcraft package or put patchcraft-core on PATH (or set PATCHCRAFT_BIN).";
 const executeFile = promisify(execFile);
@@ -16,11 +16,25 @@ const executeFile = promisify(execFile);
 class CoreRejection extends Error {}
 
 /**
- * Plan lifecycle: planned → committing → applied|failed, or planned → closed.
- * `outcome` distinguishes a confirmed failure (no mutation) from an unknown commit outcome.
+ * Plan lifecycle: planned → committing → applied, or committing → failed, or planned → closed.
+ * `outcome` tells a failure that never reached the commit line apart from one whose commit the core may
+ * have applied.
  */
 export type PatchPlanPhase = "planned" | "committing" | "applied" | "failed" | "closed";
 export type PatchPlanOutcome = "applied" | "failed" | "unknown";
+
+/** A single state value, so the phase and outcome can never disagree. */
+type PlanState =
+	| { phase: "planned" }
+	| { phase: "committing" }
+	| { phase: "applied" }
+	| { phase: "failed"; outcome: "failed" | "unknown" }
+	| { phase: "closed" };
+
+function outcomeOf(state: PlanState): PatchPlanOutcome | undefined {
+	if (state.phase === "applied") return "applied";
+	return state.phase === "failed" ? state.outcome : undefined;
+}
 
 export interface PatchPlan extends PatchResultDetails {
 	readonly phase: PatchPlanPhase;
@@ -44,7 +58,6 @@ export async function checkCore(binary: string, cwd: string): Promise<string | u
 			timeout: 2000,
 			killSignal: "SIGKILL",
 			maxBuffer: 16 * 1024,
-			windowsHide: true,
 		});
 		const result: unknown = JSON.parse(stdout);
 		if (object(result) && result.protocol === PROTOCOL_VERSION) return undefined;
@@ -139,8 +152,7 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 		cwd,
 		stdio: ["pipe", "pipe", "pipe"],
 		// Let Pi handle terminal interrupts. The core sees EOF and can roll back.
-		detached: process.platform !== "win32",
-		windowsHide: true,
+		detached: true,
 	});
 	let spawnError: (Error & { code?: string }) | undefined;
 	let stderr = "";
@@ -158,12 +170,10 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 	});
 	const cancel = () => child.stdin.end();
 	const output = frames(child.stdout.iterator({ destroyOnReturn: false }));
-	let phase: PatchPlanPhase = "planned";
-	let outcome: PatchPlanOutcome | undefined;
-	let commitAttempted = false;
+	let state: PlanState = { phase: "planned" };
 	let closing: Promise<void> | undefined;
 	function close(): Promise<void> {
-		if (phase === "planned") phase = "closed";
+		if (state.phase === "planned") state = { phase: "closed" };
 		closing ??= (async () => {
 			cancel();
 			// Drain stdout before waiting so a response in flight can't block exit.
@@ -224,39 +234,36 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 			removed: changes.reduce((sum, change) => sum + change.removed, 0),
 			fuzz: changes.reduce((sum, change) => sum + change.fuzz, 0),
 			get phase() {
-				return phase;
+				return state.phase;
 			},
 			get outcome() {
-				return outcome;
+				return outcomeOf(state);
 			},
 			async apply(signal?: AbortSignal) {
-				if (phase !== "planned") {
+				if (state.phase !== "planned") {
+					const outcome = outcomeOf(state);
 					const detail = outcome ? `, outcome: ${outcome}` : "";
-					throw new Error(`Patchcraft plan is no longer available (phase: ${phase}${detail})`);
+					throw new Error(`Patchcraft plan is no longer available (phase: ${state.phase}${detail})`);
 				}
-				phase = "committing";
+				state = { phase: "committing" };
 				try {
 					signal?.addEventListener("abort", cancel, { once: true });
 					await withPiQueues(lockPaths, signal, async () => {
 						try {
-							commitAttempted = true;
 							child.stdin.write("commit\n");
 							const result = await next();
 							if (result.status !== "applied" || !(await output.next()).done || (await exited).code !== 0) {
 								throw new Error("patchcraft-core did not acknowledge commit");
 							}
-							phase = "applied";
-							outcome = "applied";
+							state = { phase: "applied" };
 						} catch (error) {
 							// Don't release Pi's locks until the core finishes any rollback.
 							await close();
 							if (error instanceof CoreRejection && (await exited).code === 1) {
-								phase = "failed";
-								outcome = "failed";
+								state = { phase: "failed", outcome: "failed" };
 								throw error;
 							}
-							phase = "failed";
-							outcome = "unknown";
+							state = { phase: "failed", outcome: "unknown" };
 							const reason = error instanceof Error ? error.message : String(error);
 							throw new Error(`Patch commit outcome is unknown. Check the affected files before retrying. ${reason}`, {
 								cause: error,
@@ -264,10 +271,9 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 						}
 					});
 				} catch (error) {
-					if (phase === "committing") {
-						phase = "failed";
-						outcome = commitAttempted ? "unknown" : "failed";
-					}
+					// Only failures before the commit line get here (queue waits, aborts). The commit callback
+					// settles the state itself, so the core never saw a commit in this case.
+					if (state.phase === "committing") state = { phase: "failed", outcome: "failed" };
 					throw error;
 				} finally {
 					signal?.removeEventListener("abort", cancel);

@@ -2,19 +2,12 @@
 
 `patchcraft-core` is the single execution engine for Patchcraft. It owns patch
 parsing, matching, path resolution, conflict checks, writes, and rollback.
-
-## Standalone use
+It runs on Unix-like systems (macOS and Linux). Windows is not supported.
 
 ```sh
 cargo install --locked --path rust/patchcraft-core
 patchcraft-core doctor --json
-patchcraft-core apply --json < /path/to/edit.patch
 ```
-
-Run `apply` from the directory that relative patch paths should resolve
-against. It reads one UTF-8 patch from stdin and prints a JSON operation
-summary on success (exit `0`) or an error message on failure (exit `1`).
-Standalone use does not participate in Pi's process-local file queues.
 
 ## Pi protocol (version 5)
 
@@ -55,8 +48,8 @@ From [OpenAI Codex at `ca21fe65d18a9b6326759fb4263c65dfbb645aa5`](https://github
   newline handling.
 - `src/grammar.ts` in the Pi package embeds
   `codex-rs/core/assets/tools/apply_patch.lark` unchanged.
-- `tests/fixtures/codex/` is the complete upstream scenario suite. The CLI
-  test runs all 25 cases, checking exact file bytes. The only expected
+- `tests/fixtures/codex/` is the complete upstream scenario suite. The scenario
+  test runs all 25 cases through `Plan`, checking exact file bytes. The only expected
   differences are scenarios **010** (no overwriting move destinations) and
   **015** (preflight failures leave the workspace untouched).
 

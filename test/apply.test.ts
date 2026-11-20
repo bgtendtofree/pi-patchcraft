@@ -115,7 +115,7 @@ describe("patch planning and application", () => {
 		const real = path.join(root, "real");
 		const cwd = path.join(root, "logical");
 		await mkdir(real);
-		await symlink(real, cwd, process.platform === "win32" ? "junction" : "dir");
+		await symlink(real, cwd, "dir");
 		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: Fresh.txt\n+value\n*** End Patch");
 		// Pi keys the native queue on the submitted lexical path when the target is missing, not the
 		// canonical parent-resolved path. Holding the same spelling must serialize Patchcraft behind it.
@@ -139,7 +139,7 @@ describe("patch planning and application", () => {
 	it("shares Pi's mutation queue through a symlinked parent for a missing target", async () => {
 		const cwd = await workspace();
 		await mkdir(path.join(cwd, "real"));
-		await symlink(path.join(cwd, "real"), path.join(cwd, "alias"), process.platform === "win32" ? "junction" : "dir");
+		await symlink(path.join(cwd, "real"), path.join(cwd, "alias"), "dir");
 		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: alias/new.txt\n+value\n*** End Patch");
 		// The canonical parent-resolved plan path differs from the submitted spelling; the submitted
 		// lexical path is what Pi's queue and a concurrent writer actually use.
@@ -164,8 +164,8 @@ describe("patch planning and application", () => {
 		const cwd = await workspace();
 		await mkdir(path.join(cwd, "realA"));
 		await mkdir(path.join(cwd, "realZ"));
-		await symlink(path.join(cwd, "realA"), path.join(cwd, "zlink"), process.platform === "win32" ? "junction" : "dir");
-		await symlink(path.join(cwd, "realZ"), path.join(cwd, "alink"), process.platform === "win32" ? "junction" : "dir");
+		await symlink(path.join(cwd, "realA"), path.join(cwd, "zlink"), "dir");
+		await symlink(path.join(cwd, "realZ"), path.join(cwd, "alink"), "dir");
 		const linkPlan = await planPatch(
 			cwd,
 			`*** Begin Patch

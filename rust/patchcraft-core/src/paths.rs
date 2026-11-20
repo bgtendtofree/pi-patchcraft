@@ -39,13 +39,7 @@ pub(crate) fn lexical_path(cwd: &Path, input: &str) -> Result<PathBuf> {
     let home = if value == "~" {
         Some("")
     } else {
-        value.strip_prefix("~/").or_else(|| {
-            if cfg!(windows) {
-                value.strip_prefix("~\\")
-            } else {
-                None
-            }
-        })
+        value.strip_prefix("~/")
     };
     let path = if let Some(rest) = home {
         // Joining the relative suffix must not treat repeated separators as a new root.
@@ -54,7 +48,7 @@ pub(crate) fn lexical_path(cwd: &Path, input: &str) -> Result<PathBuf> {
     } else if value.starts_with("file://") {
         let url = url::Url::parse(value).map_err(|error| format!("Invalid file URL: {error}"))?;
         let lower = url.path().to_ascii_lowercase();
-        if lower.contains("%2f") || (cfg!(windows) && lower.contains("%5c")) {
+        if lower.contains("%2f") {
             return Err("File URL path must not contain encoded separators".into());
         }
         url.to_file_path()
@@ -108,7 +102,6 @@ pub(crate) struct Resolved {
     pub followed: bool,
 }
 
-#[cfg(unix)]
 fn link_parts(path: &Path) -> (Option<PathBuf>, VecDeque<OsString>) {
     // Components skips intermediate "." and a trailing separator, both significant for
     // rejecting links that require a directory. Work on raw bytes to preserve native names.
@@ -124,22 +117,6 @@ fn link_parts(path: &Path) -> (Option<PathBuf>, VecDeque<OsString>) {
         parts.push_back(".".into());
     }
     (root, parts)
-}
-
-#[cfg(not(unix))]
-fn link_parts(path: &Path) -> (Option<PathBuf>, VecDeque<OsString>) {
-    let mut root = PathBuf::new();
-    let mut parts: VecDeque<OsString> = VecDeque::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(_) | Component::RootDir => root.push(component),
-            _ => parts.push_back(component.as_os_str().to_owned()),
-        }
-    }
-    if !parts.is_empty() && path.to_string_lossy().ends_with(std::path::is_separator) {
-        parts.push_back(".".into());
-    }
-    ((!root.as_os_str().is_empty()).then_some(root), parts)
 }
 
 /// Resolve active symlink chains without lexically collapsing ".." inside a symlink target.

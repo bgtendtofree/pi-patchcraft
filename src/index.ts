@@ -10,7 +10,7 @@ import {
 	APPLY_PATCH_PROMPT_GUIDELINES,
 	APPLY_PATCH_PROMPT_SNIPPET,
 } from "./prompt.ts";
-import { formatPatchCall, formatPatchError, formatPatchProgress, formatPatchResult } from "./render.ts";
+import { type CallPhase, formatPatchCall, formatPatchError, formatPatchProgress, formatPatchResult } from "./render.ts";
 import { isPatchcraftModel, reconcileActiveTools } from "./tools.ts";
 import { type PatchResultDetails, patchResultSchema } from "./types.ts";
 
@@ -29,10 +29,16 @@ interface PatchcraftModeState {
 	mode: PatchcraftMode;
 }
 
+/** The call row follows the request until execution starts; once it has, the result row owns the details. */
+function callPhase(context: { argsComplete: boolean; executionStarted: boolean }): CallPhase {
+	if (context.executionStarted) return "running";
+	return context.argsComplete ? "ready" : "streaming";
+}
+
 export default function piPatchcraft(pi: ExtensionAPI): void {
+	// Undefined until captured for the active branch; captured before the first tool replacement.
 	let baselineTools: string[] | undefined;
 	let mode: PatchcraftMode = "auto";
-	let core: { binary: string; cwd: string; check: Promise<string | undefined> } | undefined;
 	let warned: string | undefined;
 	let generation = 0;
 	let syncing: Promise<unknown> = Promise.resolve();
@@ -43,6 +49,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		return isPatchcraftModel(ctx.model?.id, ctx.model?.api);
 	}
 
+	/** Rebuilds mode and baseline from the active branch. Bumps `generation` so queued syncs from the old session are dropped. */
 	function restoreState(ctx: ExtensionContext, resetWarnings = false): void {
 		generation++;
 		if (resetWarnings) warned = undefined;
@@ -63,10 +70,10 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		}
 	}
 
-	function coreProblem(cwd: string): Promise<string | undefined> {
-		const binary = coreBinary();
-		if (core?.binary !== binary || core.cwd !== cwd) core = { binary, cwd, check: checkCore(binary, cwd) };
-		return core.check;
+	/** Checked on every sync rather than cached (about 2 ms), so fixing the install applies on the next turn. */
+	async function coreProblem(ctx: ExtensionContext): Promise<string | undefined> {
+		if (!wantsPatchcraft(ctx)) return undefined;
+		return checkCore(coreBinary(), ctx.cwd);
 	}
 
 	function modeStatus(ctx: ExtensionContext, problem: string | undefined): string {
@@ -76,6 +83,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		return `Patchcraft mode: ${mode}\nEffective: ${enabled ? "enabled" : "disabled"}\nModel: ${model}${problem ? `\n${problem}` : ""}`;
 	}
 
+	/** Syncs run one at a time in event order; a sync whose session has since changed does nothing. */
 	function syncTools(ctx: ExtensionContext, notify = true): Promise<string | undefined> {
 		const currentGeneration = generation;
 		const result = syncing.then(() => syncToolsNow(ctx, notify, currentGeneration));
@@ -99,7 +107,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			pi.appendEntry(baselineEntryType, { tools });
 			baselineTools = tools;
 		}
-		const problem = wantsPatchcraft(ctx) ? await coreProblem(ctx.cwd) : undefined;
+		const problem = await coreProblem(ctx);
 		if (currentGeneration !== generation) return undefined;
 		const current = pi.getActiveTools();
 		const next = reconcileActiveTools({
@@ -118,7 +126,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		async handler(args, ctx) {
 			const value = args.trim().toLowerCase();
 			if (value === "" || value === "status") {
-				const problem = wantsPatchcraft(ctx) ? await coreProblem(ctx.cwd) : undefined;
+				const problem = await coreProblem(ctx);
 				ctx.ui.notify(`${modeStatus(ctx, problem)}\nUsage: /patchcraft auto|on|off`, problem ? "warning" : "info");
 				return;
 			}
@@ -128,7 +136,6 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			}
 			mode = value;
 			pi.appendEntry<PatchcraftModeState>(modeEntryType, { mode });
-			if (mode !== "off") core = undefined;
 			const problem = await syncTools(ctx, false);
 			ctx.ui.notify(modeStatus(ctx, problem), problem ? "warning" : "info");
 		},
@@ -154,8 +161,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			component.setText(
 				formatPatchCall(scanPatchPreview(typeof args?.patch === "string" ? args.patch : ""), theme, {
 					expanded: context.expanded,
-					argsComplete: context.argsComplete,
-					executionStarted: context.executionStarted,
+					phase: callPhase(context),
 				}),
 			);
 			return component;

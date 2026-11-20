@@ -1,7 +1,5 @@
 //! Unix permission and rollback behavior owned by the Rust core.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
