@@ -80,70 +80,24 @@ async function* frames(stream: AsyncIterable<Buffer>) {
 	if (size) throw new Error("Incomplete patchcraft-core response");
 }
 
-function renderWindow(window: unknown): string {
-	if (!object(window)) throw new Error("Invalid patchcraft-core diff window");
-	const { line, totalLines, before, after, leading, trailing } = window;
-	const isLine = (value: unknown): value is string => typeof value === "string" && !/[\r\n]/.test(value);
-	if (
-		typeof line !== "number" ||
-		typeof totalLines !== "number" ||
-		!Number.isSafeInteger(line) ||
-		!Number.isSafeInteger(totalLines) ||
-		line < 1 ||
-		line > totalLines ||
-		!isLine(before) ||
-		!isLine(after) ||
-		!Array.isArray(leading) ||
-		!Array.isArray(trailing) ||
-		leading.length !== Math.min(4, line - 1) ||
-		trailing.length !== Math.min(4, totalLines - line) ||
-		!leading.every(isLine) ||
-		!trailing.every(isLine)
-	) {
-		throw new Error("Invalid patchcraft-core diff window");
-	}
-
-	// Match Pi's numbered display diff; renderDiff still handles the TUI.
-	const width = String(totalLines + 1).length; // Pi counts the trailing LF.
-	const row = (kind: string, number: number, text: string) => `${kind}${String(number).padStart(width)} ${text}`;
-	const gap = ` ${" ".repeat(width)} ...`;
-	return [
-		...(line - 1 > leading.length ? [gap] : []),
-		...leading.map((text, i) => row(" ", line - leading.length + i, text)),
-		row("-", line, before),
-		row("+", line, after),
-		...trailing.map((text, i) => row(" ", line + i + 1, text)),
-		...(totalLines - line > trailing.length ? [gap] : []),
-	].join("\n");
-}
-
 function renderChange(frame: Record<string, unknown>): PatchResultChange {
-	const { change, before, after, window } = frame;
-	if (!object(change)) {
-		throw new Error("Invalid patchcraft-core change frame");
-	}
+	const { change, before, after } = frame;
+	if (!object(change)) throw new Error("Invalid patchcraft-core change frame");
 	const { operation, path, targetPath, fuzz } = change;
 	if (
 		(operation !== "add" && operation !== "update" && operation !== "move" && operation !== "delete") ||
 		typeof path !== "string" ||
 		typeof targetPath !== "string" ||
 		typeof fuzz !== "number" ||
-		!Number.isSafeInteger(fuzz) ||
-		fuzz < 0
+		typeof before !== "string" ||
+		typeof after !== "string"
 	) {
 		throw new Error("Invalid patchcraft-core change");
 	}
-	let displayDiff: string;
-	if (window !== undefined) {
-		displayDiff = renderWindow(window);
-	} else if (typeof before === "string" && typeof after === "string") {
-		({ diff: displayDiff } = generateDiffString(
-			Buffer.from(before, "base64").toString("utf8"),
-			Buffer.from(after, "base64").toString("utf8"),
-		));
-	} else {
-		throw new Error("Invalid patchcraft-core change frame");
-	}
+	const { diff: displayDiff } = generateDiffString(
+		Buffer.from(before, "base64").toString("utf8"),
+		Buffer.from(after, "base64").toString("utf8"),
+	);
 	return {
 		operation,
 		path,
@@ -260,7 +214,7 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 			!changes.length ||
 			!Array.isArray(lockPaths) ||
 			!lockPaths.length ||
-			!lockPaths.every((key): key is string => typeof key === "string" && path.isAbsolute(key))
+			!lockPaths.every((key): key is string => typeof key === "string")
 		) {
 			throw new Error("Invalid patchcraft-core plan");
 		}

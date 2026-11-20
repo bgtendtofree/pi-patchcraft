@@ -13,12 +13,12 @@ Patchcraft gives GPT models their familiar Codex patch language. It validates th
 - Relative, absolute, home-relative, and `file://` paths
 - Full preflight before the first write
 - Atomic per-file writes with mode preservation
-- 1 MiB patch and 64 MiB source limits
+- 1 MiB patch and 8 MiB source limits
 - Best-effort patch-level rollback
 - Concurrent source-change detection
 - Exact, whitespace-tolerant, and punctuation-normalized context matching with a bounded comparison budget
 - File symlink targets followed for Add and Update; the link is preserved
-- Unicode case-fold alias detection beyond simple lowercasing (`ß`/`SS`, `ẞ`/`ss`, `σ`/`ς`, `S`/`ſ`, `µ`/`Μ`)
+- Case- and normalization-insensitive conflict checks for two spellings of one file
 - Automatic `apply_patch` activation for `gpt-*` and Codex Responses models
 - Grammar-constrained patch text on OpenAI models that support custom tools
 - Structured result for `codemode` scripts (`changes`, `added`, `removed`, `fuzz`)
@@ -90,12 +90,12 @@ Patchcraft intentionally fails instead of guessing:
 
 - `Add File` creates the file, or overwrites an existing one like Codex; the previous content is captured for rollback.
 - `Update File` targets must exist and resolve to a regular file. A file symlink is followed to its target for `Add File` and `Update File`, and the link is preserved; `Add File` creates the target of a dangling link. Link targets are walked component by component, so a `..` after a symlinked directory resolves against the real directory chain instead of being collapsed lexically. A dangling target under symlinked parents is canonicalized so it conflicts with a direct write to the same missing file. A target ending in a separator requires a directory and is rejected for a file write, including when it is dangling. `Delete File` and `Move` refuse a file symlink instead of deleting or moving its target.
-- Patches are capped at 1 MiB and update sources at 64 MiB, rejected before any mutation.
+- Patches are capped at 1 MiB and update sources at 8 MiB, rejected before any mutation.
 - Move target must not exist. A `*** Move to:` that resolves to any existing file is rejected, including another spelling of the source itself on a case-insensitive filesystem.
 - Paths resolve like Pi's built-in file tools, and header paths are trimmed of trailing whitespace like Codex; filesystem access follows process permissions.
 - Conflicting operations touching the same source or destination are rejected. Two operations that resolve to the same file are rejected like Codex `multiple operations target`, so a repeated `*** Update File:` header is invalid; put multiple `@@` hunks with their bodies under one header. Rejecting a colliding move destination is stricter than Codex main ([openai/codex#53409](https://github.com/openai/codex/issues/53409)).
-- Paths through symlinked parent directories are canonicalized before conflict checks, including the missing suffix of a dangling file symlink. Genuinely case-sensitive filesystems keep `a.txt` and `A.txt` distinct. Case-insensitive name lookup and Unicode-normalization-insensitive name lookup are probed independently, read-only, and only when an envelope contains a potential alias pair, so a lone new file never lists its directory. Case folding includes multi-character aliases such as `ß`/`SS` and `ẞ`/`ss`, plus `σ`/`ς`, `S`/`ſ`, and `µ`/`Μ`. A case alias of one existing file, a case or normalization alias of a not-yet-created target, and a normalization alias of a move destination (`café.txt` vs `cafe\u0301.txt`) all conflict instead of colliding after apply or silently dropping content. An axis whose probe cannot decide is treated as insensitive for that pair, so a possible collision fails closed; an axis the filesystem is proven sensitive for keeps the spellings distinct. The folded identity is used only for conflict comparison; it never turns a rejected move into an in-place update.
-- A touched file may not also be a directory another operation must create: a file `folder` and a child `folder/child.txt` conflict during preflight, on path boundaries rather than a raw prefix, so `foo` and `foobar/x.txt` stay distinct. Case and normalization aliases of an ancestor directory conflict only when the filesystem actually equates the spelling.
+- Paths through symlinked parent directories are canonicalized before conflict checks, including the missing suffix of a dangling file symlink. Conflict comparison ignores case and Unicode normalization on every host, so a patch behaves the same on case-sensitive and case-insensitive filesystems: `a.txt` with `A.txt`, `café.txt` with `cafe\u0301.txt`, and two spellings of a not-yet-created target all conflict during preflight instead of colliding after apply or silently dropping content. The folded identity is used only for conflict comparison; it never turns a rejected move into an in-place update.
+- A touched file may not also be a directory another operation must create: a file `folder` and a child `folder/child.txt` conflict during preflight, on path boundaries rather than a raw prefix, so `foo` and `foobar/x.txt` stay distinct. An alias of an ancestor directory conflicts the same way.
 - No-op updates are rejected. Matching has an explicit comparison budget; a patch that would otherwise scan a huge non-matching sequence at every fuzz tier fails with a request to re-read the file and use smaller hunks instead of blocking the tool loop.
 - Source content is revalidated after mutation queues are acquired. Permissions changed between planning and apply are rejected rather than overwritten. A target that exists must also be writable: a read-only file is refused like Pi `edit`/`write` and Codex, instead of being replaced by the atomic rename.
 - Mutation-queue keys follow Pi: an existing file keys on its realpath, a not-yet-created target on the submitted lexical path Pi also uses for a missing file. Keys are resolved again at apply time, so a target that appears after planning (drift) cannot invert another plan's lock order and deadlock; the plan is then rejected by the post-lock revalidation.
@@ -144,7 +144,7 @@ pi -e git:github.com/bgtendtofree/pi-patchcraft
 
 ## Rendering
 
-Patchcraft registers `renderCall` and `renderResult`. The call row previews the request: a Codex-style summary, per-file counters while the patch streams, a multi-file roster, and a bounded glimpse of the focused file once the arguments are complete. Once the arguments are complete it also warns about repeated file headers and move-only, empty, or no-op updates that the core will reject; these warnings are advisory and the Rust parser remains authoritative. When execution starts, a single-file call row keeps its header and counts; a multi-file call row keeps only the tool name, leaving the exact totals, roster, and diffs to the result row. The result row is self-contained: a single-file patch shows its full diff (matching Pi's `edit`), while a multi-file patch shows the exact counts and the roster, plus an expand hint when there are diffs; expanded results add bounded per-file diffs through Pi's native `renderDiff`.
+Patchcraft registers `renderCall` and `renderResult`. The call row previews the request: a Codex-style summary, per-file counters while the patch streams, a multi-file roster, and a bounded glimpse of the focused file once the arguments are complete. When execution starts, a single-file call row keeps its header and counts; a multi-file call row keeps only the tool name, leaving the exact totals, roster, and diffs to the result row. The result row is self-contained: a single-file patch shows its full diff (matching Pi's `edit`), while a multi-file patch shows the exact counts and the roster, plus an expand hint when there are diffs; expanded results add bounded per-file diffs through Pi's native `renderDiff`.
 
 ```text
 apply_patch  Edited src/app.ts (+3 -1)
@@ -166,11 +166,9 @@ Edited 3 files (+5 -2)
   └ D old.txt (+0 -1)
 ```
 
-The result row does not depend on the call row's cached text, so hosts that snapshot rows separately (for example the HTML exporter) still show the exact multi-file summary and roster. Patchcraft does not register `renderShell: "self"`, so Pi's default row keeps pending/success/error backgrounds and output padding.
+The result row carries its own summary and roster, so hosts that snapshot rows separately (for example the HTML exporter) still show the exact multi-file summary. Patchcraft does not register `renderShell: "self"`, so Pi's default row keeps pending/success/error backgrounds and output padding.
 
 Patch execution and returned `content`, `details`, and `structuredContent` are unchanged, including per-file `displayDiff` and added/removed/fuzz counts.
-
-For an unambiguous single-line replacement in a large LF text file, Rust sends only the changed lines and nearby context instead of two full snapshots. Other changes still use Pi's full diff.
 
 ## Development
 
@@ -206,7 +204,7 @@ streaming preview and final diff. Run `mise run rust:check` for core tests
 and `mise run ci` for the full gate, including the packed extension with the
 real CLI.
 
-To measure a one-line update in a 16 MiB file on macOS or Linux, build with
+To measure a one-line update in a 6 MiB file on macOS or Linux, build with
 `cargo build --locked --release` and run `bash scripts/benchmark-core.sh`.
 The script measures the standalone core and the Pi adapter separately.
 
@@ -214,10 +212,10 @@ Tests follow the same ownership boundary:
 
 - `rust/patchcraft-core/tests/` covers core matrices that do not need the Pi host: parsing,
   matching, transaction preconditions, and filesystem outcomes.
-- `test/apply.test.ts` keeps only the TS client seam: diff frames, Pi mutation queues, abort/close,
-  error mapping, and the mirrored protocol limits.
-- `test/index.test.ts`, `test/render.test.ts`, and `test/preview.test.ts` cover the extension host
-  and TUI contracts.
+- `test/core.test.ts` and `test/apply.test.ts` keep only the TS client seam: diff frames, Pi
+  mutation queues, abort/close, error mapping, and the mirrored protocol limits.
+- `test/index.test.ts`, `test/tools.test.ts`, `test/render.test.ts`, `test/preview.test.ts`, and
+  `test/patch-format.test.ts` cover the extension host, loadout restore, and TUI contracts.
 
 ## Current compatibility
 

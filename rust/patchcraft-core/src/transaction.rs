@@ -102,8 +102,9 @@ pub struct Plan {
 fn read_file(path: &Path, metadata: &Metadata) -> Result<Vec<u8>> {
     let limit_error = |size| {
         format!(
-            "Patch source is too large: {} ({size} bytes exceeds 64 MiB limit)",
-            path.display()
+            "Patch source is too large: {} ({size} bytes exceeds {} MiB limit)",
+            path.display(),
+            MAX_SOURCE_BYTES / (1024 * 1024)
         )
     };
     if !metadata.is_file() {
@@ -186,12 +187,15 @@ impl Plan {
             }
             changes.push(change);
         }
-        aliases::check(changes.iter().flat_map(|change| {
+        // One path per change: a move's own source and target may differ only by spelling.
+        aliases::check(changes.iter().map(|change| {
             let operation = change.summary.operation.label();
-            [
-                (change.source.clone(), operation),
-                (change.target.clone(), operation),
-            ]
+            let path = if change.is_move() {
+                change.target.clone()
+            } else {
+                change.source.clone()
+            };
+            (path, operation)
         }))?;
         Ok(Self { changes })
     }

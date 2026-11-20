@@ -32,14 +32,7 @@ pub(crate) fn wire_path(path: &Path) -> Result<&str> {
 }
 
 pub(crate) fn lexical_path(cwd: &Path, input: &str) -> Result<PathBuf> {
-    let value: String = input
-        .chars()
-        .map(|c| match c {
-            '\u{00a0}' | '\u{2000}'..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}' => ' ',
-            c => c,
-        })
-        .collect();
-    let value = value.strip_prefix('@').unwrap_or(&value);
+    let value = input.strip_prefix('@').unwrap_or(input);
     if value.is_empty() || value.contains('\0') {
         return Err("Patch path is empty or contains NUL".into());
     }
@@ -69,6 +62,7 @@ pub(crate) fn lexical_path(cwd: &Path, input: &str) -> Result<PathBuf> {
     } else {
         PathBuf::from(value)
     };
+    // A `file://` path can introduce NUL after percent-decoding.
     if path.as_os_str().as_encoded_bytes().contains(&0) {
         return Err("Patch path contains NUL".into());
     }

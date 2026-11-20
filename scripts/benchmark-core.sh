@@ -10,7 +10,7 @@ import { copyFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const work = process.argv[2];
 const filler = "0123456789".repeat(9);
-const source = Array.from({ length: Math.floor(16 * 1024 * 1024 / 100) }, (_, index) =>
+const source = Array.from({ length: Math.floor(6 * 1024 * 1024 / 100) }, (_, index) =>
     `${String(index).padStart(8, "0")} ${filler}\n`).join("");
 writeFileSync(join(work, "core.txt"), `before\n${source}`);
 copyFileSync(join(work, "core.txt"), join(work, "adapter.txt"));

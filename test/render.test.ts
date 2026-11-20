@@ -116,17 +116,6 @@ describe("formatPatchCall", () => {
 		assert.equal(header, "apply_patch  Edited 2 files");
 	});
 
-	it("shows advisory warnings once the arguments are complete", () => {
-		const move = scanPatchPreview("*** Begin Patch\n*** Update File: old.rs\n*** Move to: new.rs");
-		assert.doesNotMatch(formatPatchCall(move, theme, { expanded: false, argsComplete: false }), /move-only/);
-		assert.match(formatPatchCall(move, theme, { expanded: false, argsComplete: true }), /move-only update/);
-
-		const duplicate = scanPatchPreview(
-			"*** Begin Patch\n*** Update File: a.ts\n@@\n-old\n+new\n*** Update File: a.ts\n@@\n-old\n+new",
-		);
-		assert.match(formatPatchCall(duplicate, theme, { expanded: false, argsComplete: true }), /repeated update header/);
-	});
-
 	it("labels rename-only moves and deletes", () => {
 		const move = scanPatchPreview("*** Begin Patch\n*** Update File: old.rs\n*** Move to: new.rs");
 		assert.equal(

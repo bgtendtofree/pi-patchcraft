@@ -80,6 +80,20 @@ describe("patch planning and application", () => {
 		);
 	});
 
+	it("rejects two spellings of one file before any mutation", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "value.txt");
+		await writeFile(target, "old\n");
+		await assert.rejects(
+			planPatch(
+				cwd,
+				"*** Begin Patch\n*** Update File: value.txt\n@@\n-old\n+one\n*** Update File: VALUE.txt\n@@\n-old\n+two\n*** End Patch",
+			),
+			/conflicting operations/,
+		);
+		assert.equal(await readFile(target, "utf8"), "old\n");
+	});
+
 	it("creates or overwrites a file with Add File like Codex, capturing old content", async () => {
 		const cwd = await workspace();
 		const target = path.join(cwd, "existing.txt");
@@ -174,10 +188,13 @@ describe("patch planning and application", () => {
 		// submitted spellings sort opposite to the direct plan's, so lexical keys would deadlock here.
 		await writeFile(path.join(cwd, "realA/one.txt"), "drift\n");
 		await writeFile(path.join(cwd, "realZ/two.txt"), "drift\n");
+		let timer: NodeJS.Timeout | undefined;
 		const settled = await Promise.race([
 			Promise.allSettled([applyPatchPlan(linkPlan), applyPatchPlan(directPlan)]),
-			new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("deadlock")), 5000)),
-		]);
+			new Promise<never>((_resolve, reject) => {
+				timer = setTimeout(() => reject(new Error("deadlock")), 5000);
+			}),
+		]).finally(() => clearTimeout(timer));
 		for (const result of settled) {
 			assert.equal(result.status, "rejected");
 			if (result.status === "rejected") assert.match(String(result.reason), /changed before apply/);

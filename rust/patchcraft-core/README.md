@@ -16,28 +16,24 @@ against. It reads one UTF-8 patch from stdin and prints a JSON operation
 summary on success (exit `0`) or an error message on failure (exit `1`).
 Standalone use does not participate in Pi's process-local file queues.
 
-## Pi protocol (version 4)
+## Pi protocol (version 5)
 
 Pi starts `patchcraft-core session --json` in the workspace directory. The
 one-shot session uses newline-delimited JSON on stdout. On stdin the host sends
-one JSON line `{"protocol":4,"cwd":"/logical/workspace","patch":"..."}` and
-keeps the pipe open. The absolute `cwd` must identify the child process's
-working directory. Its original spelling is used for Pi's missing-file queues.
+one JSON line `{"protocol":5,"cwd":"/logical/workspace","patch":"..."}` and
+keeps the pipe open. The core resolves patch paths against `cwd`; its original
+spelling is used for Pi's missing-file queues.
 
 1. The core plans without writing. It sends one `{"status":"change", ...}`
-   frame per change, with `change` metadata and either `before`/`after`
-   snapshots in base64 or a `window`. A window describes one unambiguous
-   single-line replacement in an LF-terminated UTF-8 file of at least 1 MiB: `line`
-   (1-based), `totalLines` (excluding the final LF's empty element),
-   `before`/`after` line text, and up to four unchanged `leading` and
-   `trailing` lines. Pi uses the same display format for both paths. Then
-   the core sends `{"protocol":4,"status":"planned","lockPaths":[...]}`.
+   frame per change, with `change` metadata and `before`/`after` snapshots in
+   base64. Then the core sends
+   `{"protocol":5,"status":"planned","lockPaths":[...]}`.
 2. Only after acquiring Pi's queues for those paths, the host writes the
    literal line `commit\n`. The plan stays in Rust; the host cannot send back
    changed paths, snapshots, or chunks.
 3. The core revalidates and applies the plan, then replies
-   `{"protocol":4,"status":"applied"}` and exits `0`. Errors use
-   `{"protocol":4,"status":"error","message":"..."}` and exit `1`.
+   `{"protocol":5,"status":"applied"}` and exits `0`. Errors use
+   `{"protocol":5,"status":"error","message":"..."}` and exit `1`.
 
 Closing stdin discards a plan before commit or requests cooperative
 cancellation after commit. Keep the pipe open until the result during normal

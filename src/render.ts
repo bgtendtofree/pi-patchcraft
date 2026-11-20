@@ -170,19 +170,12 @@ interface CallPreviewOptions {
 	executionStarted: boolean;
 }
 
-function appendWarnings(lines: string[], warnings: PatchPreview["warnings"], theme: RenderTheme): void {
-	for (const warning of warnings) {
-		lines.push(`  ${theme.fg("warning", `⚠ ${warning.message}`)}`);
-	}
-}
-
 function formatCallPreview(preview: PatchPreview, theme: RenderTheme, options: CallPreviewOptions): string {
 	if (preview.files.length === 0) return title(theme);
 	if (preview.files.length === 1) {
 		const file = preview.files[0] as PreviewFile;
 		const lines = [singleHeader(file, theme)];
 		if (options.argsComplete && !options.executionStarted) {
-			appendWarnings(lines, preview.warnings, theme);
 			appendGlimpse(lines, file, theme, options.expanded, "  ");
 		}
 		if (preview.truncated && !options.executionStarted) {
@@ -196,7 +189,6 @@ function formatCallPreview(preview: PatchPreview, theme: RenderTheme, options: C
 	// Delete counts are only known after reading the source, so omit uncertain totals from the preview.
 	const showCounts = preview.files.every((file) => file.operation !== "delete");
 	const lines = [multiHeader(preview.files, preview.added, preview.removed, theme, showCounts)];
-	if (options.argsComplete) appendWarnings(lines, preview.warnings, theme);
 	const max = options.expanded ? MAX_ROSTER_EXPANDED : MAX_ROSTER_COLLAPSED;
 	const visible = preview.files.slice(0, max);
 	const focus = options.argsComplete ? focusFile(visible) : undefined;

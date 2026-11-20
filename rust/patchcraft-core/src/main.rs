@@ -8,8 +8,6 @@ use patchcraft_core::{Cancelled, MAX_PATCH_BYTES, PROTOCOL_VERSION, Plan};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-mod diff_window;
-
 // Allow six wire bytes per input byte, plus space for a long workspace path.
 const MAX_REQUEST_BYTES: usize = 6 * (MAX_PATCH_BYTES + 32 * 1024);
 
@@ -29,7 +27,7 @@ fn send(value: &impl Serialize) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn session(cwd: &Path, cancelled: Arc<Cancelled>) -> Result<ExitCode, String> {
+fn session(cancelled: Arc<Cancelled>) -> Result<ExitCode, String> {
     let mut input = io::BufReader::new(io::stdin());
     let mut line = Vec::new();
     (&mut input)
@@ -45,17 +43,6 @@ fn session(cwd: &Path, cancelled: Arc<Cancelled>) -> Result<ExitCode, String> {
             "Unsupported protocol {}; expected {PROTOCOL_VERSION}",
             request.protocol
         ));
-    }
-    // chdir/getcwd loses symlink spellings, which Pi uses to queue missing files.
-    if !request.cwd.is_absolute()
-        || dunce::canonicalize(&request.cwd).ok().as_deref()
-            != Some(
-                dunce::canonicalize(cwd)
-                    .map_err(|error| error.to_string())?
-                    .as_path(),
-            )
-    {
-        return Err("Session cwd does not identify the core working directory".into());
     }
     drop(line);
     let (accept, decision) = mpsc::sync_channel(1);
@@ -94,31 +81,19 @@ fn session(cwd: &Path, cancelled: Arc<Cancelled>) -> Result<ExitCode, String> {
         })
         .collect::<Result<_, _>>()?;
     #[derive(Serialize)]
-    #[serde(untagged)]
-    enum DiffPayload<'a> {
-        Compact { window: diff_window::DiffWindow<'a> },
-        Snapshots { before: String, after: String },
-    }
-    #[derive(Serialize)]
     struct ChangeFrame<'a, T> {
         status: &'static str,
         change: &'a T,
-        #[serde(flatten)]
-        diff: DiffPayload<'a>,
+        before: String,
+        after: String,
     }
     for change in plan.changes() {
         let (before, after) = change.texts();
-        let diff = match diff_window::single_line_window(before, after) {
-            Some(window) => DiffPayload::Compact { window },
-            None => DiffPayload::Snapshots {
-                before: STANDARD.encode(before),
-                after: STANDARD.encode(after),
-            },
-        };
         send(&ChangeFrame {
             status: "change",
             change: change.summary(),
-            diff,
+            before: STANDARD.encode(before),
+            after: STANDARD.encode(after),
         })?;
     }
     send(&json!({ "protocol": PROTOCOL_VERSION, "status": "planned", "lockPaths": lock_paths }))?;
@@ -175,7 +150,7 @@ fn run() -> Result<ExitCode, String> {
     if standalone_mode {
         standalone(&cwd, &cancelled).map(|()| ExitCode::SUCCESS)
     } else {
-        session(&cwd, cancelled)
+        session(cancelled)
     }
 }
 

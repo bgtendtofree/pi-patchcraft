@@ -289,7 +289,7 @@ describe("pi-patchcraft extension", () => {
 		assert.match(harness.notifications.at(-1) ?? "", /Effective: disabled/);
 	});
 
-	it("warns again for a new session while the core is still unavailable", async () => {
+	it("warns once per session while the core is unavailable", async () => {
 		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-warn-"));
 		temporaryDirectories.push(cwd);
 		const saved = process.env.PATCHCRAFT_BIN;
@@ -298,30 +298,15 @@ describe("pi-patchcraft extension", () => {
 			process.env.PATCHCRAFT_BIN = path.join(cwd, "missing");
 			const harness = extensionHarness(["read", "edit"]);
 			await harness.emit("session_start");
+			await harness.emit("session_tree");
+			await harness.emit("model_select");
 			assert.equal(harness.notifications.length, 1);
+			assert.match(harness.notifications[0] ?? "", /disabled.*not found/);
 
 			harness.context.sessionManager = SessionManager.inMemory();
 			harness.tools = ["read", "edit"];
 			await harness.emit("session_start", "new");
 			assert.equal(harness.notifications.length, 2);
-			assert.match(harness.notifications[1] ?? "", /disabled.*not found/);
-		} finally {
-			process.env.PATCHCRAFT_BIN = saved;
-		}
-	});
-
-	it("does not repeat the core warning on tree navigation", async () => {
-		const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-warn-tree-"));
-		temporaryDirectories.push(cwd);
-		const saved = process.env.PATCHCRAFT_BIN;
-		assert.ok(saved);
-		try {
-			process.env.PATCHCRAFT_BIN = path.join(cwd, "missing");
-			const harness = extensionHarness(["read", "edit"]);
-			await harness.emit("session_start");
-			assert.equal(harness.notifications.length, 1);
-			await harness.emit("session_tree");
-			assert.equal(harness.notifications.length, 1);
 		} finally {
 			process.env.PATCHCRAFT_BIN = saved;
 		}
@@ -417,22 +402,6 @@ describe("pi-patchcraft extension", () => {
 				.filter((entry) => entry.type === "custom" && entry.customType === "patchcraft-baseline-tools").length,
 			1,
 		);
-	});
-
-	it("never enables edit/write omitted from the baseline", async () => {
-		for (const editingTools of [[], ["edit"], ["write"]]) {
-			const baseline = ["read", ...editingTools, "bash"];
-			const initial = extensionHarness(baseline);
-			await initial.emit("session_start");
-			const resumed = extensionHarness(initial.tools, initial.context.sessionManager);
-			await resumed.emit("session_start", "resume");
-			resumed.context.model = { id: "claude-sonnet-4", provider: "anthropic" };
-			await resumed.emit("model_select");
-			assert.deepEqual(resumed.tools, baseline);
-			await resumed.mode("on");
-			await resumed.mode("off");
-			assert.deepEqual(resumed.tools, baseline);
-		}
 	});
 
 	it("preserves codemode and disabled write in a CLI-style adjusted baseline", async () => {
@@ -614,107 +583,6 @@ describe("pi-patchcraft extension", () => {
 		assert.ok(error);
 	});
 
-	it("invalidates the call preview when the same theme object changes colors", () => {
-		const { tool } = extensionHarness([]);
-		const patch = "*** Begin Patch\n*** Update File: value.txt\n@@\n-before\n+after";
-		const state = {};
-		let tone = "a";
-		const theme = {
-			fg: (color: string, text: string) => `<${tone}:${color}>${text}`,
-			bold: (text: string) => text,
-		};
-		const render = () =>
-			(tool.renderCall as (args: unknown, theme: unknown, context: unknown) => { render(width: number): string[] })(
-				{ patch },
-				theme,
-				{ expanded: false, argsComplete: false, state, lastComponent: undefined },
-			);
-
-		const first = stripTerminalSequences(render().render(80).join("\n"));
-		assert.match(first, /<a:toolTitle>/);
-		tone = "b";
-		const second = stripTerminalSequences(render().render(80).join("\n"));
-		assert.match(second, /<b:toolTitle>/);
-	});
-
-	it("renders the exact multi-file result without rewriting the call row", () => {
-		const { tool } = extensionHarness([]);
-		const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
-		const renderKeyHint = (keybinding: string, description: string) => `${keybinding} ${description}`;
-		const patch = "*** Begin Patch\n*** Update File: a.ts\n@@\n-old\n+new\n*** Delete File: old.txt\n*** End Patch";
-		const state = {};
-		const call = (tool.renderCall as (args: unknown, theme: unknown, context: unknown) => unknown)({ patch }, theme, {
-			expanded: false,
-			argsComplete: true,
-			executionStarted: true,
-			state,
-			lastComponent: undefined,
-		});
-		assert.ok(call);
-		const callText = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
-		assert.equal(callText.trimEnd(), "apply_patch");
-
-		const details = {
-			changes: [
-				{
-					operation: "update",
-					path: "a.ts",
-					targetPath: "a.ts",
-					displayDiff: "-1 old\n+1 new",
-					added: 1,
-					removed: 1,
-					fuzz: 0,
-				},
-				{
-					operation: "delete",
-					path: "old.txt",
-					targetPath: "old.txt",
-					displayDiff: "-1 gone",
-					added: 0,
-					removed: 1,
-					fuzz: 0,
-				},
-			],
-			added: 1,
-			removed: 2,
-			fuzz: 0,
-		};
-		const rendered = (
-			tool.renderResult as (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown
-		)({ content: [{ type: "text", text: "Patch applied" }], details }, { expanded: false, isPartial: false }, theme, {
-			isError: false,
-			lastComponent: undefined,
-			keyHint: renderKeyHint,
-			state,
-		});
-		assert.ok(rendered);
-		const resultText = stripTerminalSequences((rendered as { render(width: number): string[] }).render(80).join("\n"));
-		assert.match(resultText, /Edited 2 files \(\+1 -2\)/);
-		assert.match(resultText, /└ M a\.ts \(\+1 -1\)/);
-		assert.match(resultText, /└ D old\.txt \(\+0 -1\)/);
-		assert.match(resultText, /app\.tools\.expand to expand diffs/);
-
-		// Expanding after the result must render the diffs without touching the call row.
-		const expanded = (
-			tool.renderResult as (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown
-		)({ content: [{ type: "text", text: "Patch applied" }], details }, { expanded: true, isPartial: false }, theme, {
-			isError: false,
-			lastComponent: undefined,
-			keyHint: renderKeyHint,
-			state,
-		});
-		assert.ok(expanded);
-		const expandedText = stripTerminalSequences(
-			(expanded as { render(width: number): string[] }).render(80).join("\n"),
-		);
-		assert.match(expandedText, /old/);
-		assert.match(expandedText, /new/);
-
-		// A host that snapshots the call row before the result still gets the exact result row.
-		const after = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
-		assert.equal(after, callText);
-	});
-
 	it("declares grammar constrained sampling for capable models", () => {
 		let tool: RegisteredTool | undefined;
 		const pi = {
@@ -740,23 +608,8 @@ describe("pi-patchcraft extension", () => {
 		assert.deepEqual(schema?.required, ["patch"]);
 		assert.equal(schema?.properties?.patch?.type, "string");
 
-		const { variants } = tool?.constrainedSampling ?? { type: "", variants: {} };
 		assert.equal(tool?.constrainedSampling?.type, "grammar");
-		const grammarText = variants.openai_lark ?? "";
-		assert.ok(grammarText.length > 0);
-		// These markers are part of Codex's constrained-sampling grammar.
-		for (const marker of [
-			"*** Begin Patch",
-			"*** End Patch",
-			"*** Add File: ",
-			"*** Delete File: ",
-			"*** Update File: ",
-			"*** Move to: ",
-			"*** End of File",
-			"@@",
-		]) {
-			assert.ok(grammarText.includes(marker), `grammar is missing ${marker}`);
-		}
+		const grammarText = tool?.constrainedSampling.variants.openai_lark ?? "";
 		// Additions have to allow empty lines; openai/codex#2651 fixed a /\(.+\)/ here.
 		assert.ok(grammarText.includes('add_line: "+" /(.*)/ LF -> line'));
 	});

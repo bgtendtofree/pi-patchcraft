@@ -50,7 +50,6 @@ describe("scanPatchPreview", () => {
 			added: 0,
 			removed: 0,
 			truncated: false,
-			warnings: [],
 		});
 		const preview = scanPatchPreview(`*** Begin Patch
 garbage
@@ -104,47 +103,5 @@ garbage
 			{ type: "delete", text: "old b" },
 			{ type: "add", text: "new b" },
 		]);
-	});
-
-	it("warns about duplicate paths and hunks the core rejects", () => {
-		const duplicate = scanPatchPreview(`*** Begin Patch
-*** Update File: a.txt
-@@
--a
-+b
-*** Update File: a.txt
-@@
--c
-+d
-*** End Patch`);
-		assert.equal(duplicate.files.length, 1);
-		assert.deepEqual(
-			duplicate.warnings.map((warning) => warning.code),
-			["duplicate-path"],
-		);
-		assert.match(duplicate.warnings[0]?.message ?? "", /combine hunks/);
-
-		const moveOnly = scanPatchPreview("*** Begin Patch\n*** Update File: old.rs\n*** Move to: new.rs\n*** End Patch");
-		assert.deepEqual(
-			moveOnly.warnings.map((warning) => warning.code),
-			["move-only"],
-		);
-
-		const empty = scanPatchPreview("*** Begin Patch\n*** Update File: empty.txt\n*** End Patch");
-		assert.deepEqual(
-			empty.warnings.map((warning) => warning.code),
-			["empty-update"],
-		);
-
-		const noOp = scanPatchPreview("*** Begin Patch\n*** Update File: same.txt\n@@\n context\n*** End Patch");
-		assert.deepEqual(
-			noOp.warnings.map((warning) => warning.code),
-			["no-op-update"],
-		);
-
-		const contextMove = scanPatchPreview(
-			"*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@\n context\n*** End Patch",
-		);
-		assert.deepEqual(contextMove.warnings, []);
 	});
 });

@@ -10,13 +10,7 @@ import {
 	APPLY_PATCH_PROMPT_GUIDELINES,
 	APPLY_PATCH_PROMPT_SNIPPET,
 } from "./prompt.ts";
-import {
-	formatPatchCall,
-	formatPatchError,
-	formatPatchProgress,
-	formatPatchResult,
-	type RenderTheme,
-} from "./render.ts";
+import { formatPatchCall, formatPatchError, formatPatchProgress, formatPatchResult } from "./render.ts";
 import { isPatchcraftModel, reconcileActiveTools } from "./tools.ts";
 import { type PatchResultDetails, patchResultSchema } from "./types.ts";
 
@@ -33,26 +27,6 @@ type PatchcraftMode = "auto" | "off" | "on";
 
 interface PatchcraftModeState {
 	mode: PatchcraftMode;
-}
-
-interface PatchcraftRenderState {
-	callPatch?: string;
-	callOptions?: string;
-	callText?: string;
-	callThemeKey?: string;
-}
-
-/** Pi's theme is a stable proxy, so cache identity is a fingerprint of the colors we render. */
-function themeFingerprint(theme: RenderTheme): string {
-	return [
-		theme.fg("muted", ""),
-		theme.fg("accent", ""),
-		theme.fg("toolTitle", ""),
-		theme.fg("toolDiffAdded", ""),
-		theme.fg("toolDiffRemoved", ""),
-		theme.fg("toolDiffContext", ""),
-		theme.fg("warning", ""),
-	].join("|");
 }
 
 export default function piPatchcraft(pi: ExtensionAPI): void {
@@ -176,22 +150,14 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		outputSchema: patchResultSchema,
 		executionMode: "sequential",
 		renderCall(args, theme, context) {
-			const state = context.state as PatchcraftRenderState;
-			const patch = typeof args?.patch === "string" ? args.patch : "";
-			const options = `${context.expanded}:${context.argsComplete}:${context.executionStarted}`;
-			const themeKey = themeFingerprint(theme);
-			if (state.callPatch !== patch || state.callOptions !== options || state.callThemeKey !== themeKey) {
-				state.callPatch = patch;
-				state.callOptions = options;
-				state.callText = formatPatchCall(scanPatchPreview(patch), theme, {
+			const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+			component.setText(
+				formatPatchCall(scanPatchPreview(typeof args?.patch === "string" ? args.patch : ""), theme, {
 					expanded: context.expanded,
 					argsComplete: context.argsComplete,
 					executionStarted: context.executionStarted,
-				});
-				state.callThemeKey = themeKey;
-			}
-			const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
-			component.setText(state.callText ?? "");
+				}),
+			);
 			return component;
 		},
 		renderResult(result, options, theme, context) {

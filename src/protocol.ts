@@ -6,10 +6,10 @@
  */
 
 /** Must match `patchcraft_core::PROTOCOL_VERSION`. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** Must match `patchcraft_core::MAX_SOURCE_BYTES`. */
-export const MAX_SOURCE_BYTES = 64 * 1024 * 1024;
+export const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 
 /** Two base64 source snapshots (4/3 of the source size each) plus JSON overhead. */
 export const MAX_FRAME_BYTES = 3 * MAX_SOURCE_BYTES;
