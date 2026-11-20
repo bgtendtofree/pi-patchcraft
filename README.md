@@ -204,10 +204,6 @@ streaming preview and final diff. Run `mise run rust:check` for core tests
 and `mise run ci` for the full gate, including the packed extension with the
 real CLI.
 
-To measure a one-line update in a 6 MiB file on macOS or Linux, build with
-`cargo build --locked --release` and run `bash scripts/benchmark-core.sh`.
-The script measures the standalone core and the Pi adapter separately.
-
 Tests follow the same ownership boundary:
 
 - `rust/patchcraft-core/tests/` covers core matrices that do not need the Pi host: parsing,
@@ -217,29 +213,10 @@ Tests follow the same ownership boundary:
 - `test/index.test.ts`, `test/tools.test.ts`, `test/render.test.ts`, `test/preview.test.ts`, and
   `test/patch-format.test.ts` cover the extension host, loadout restore, and TUI contracts.
 
-## Current compatibility
+## Compatibility
 
-Development and package smoke tests pin:
-
-- Node.js 24.22.2 through mise
-- npm locked dependencies
-- Pi 1.5.2
-- TypeScript 7
-
-Pi 1.5.2 is the development baseline; runtime dependencies remain `"*"` peer dependencies. Grammar sampling, structured results, file mutation queues, and codemode prompt guidelines are unchanged.
-
-Relevant Pi 1.3–1.5 changes:
-
-| Feature / API | Patchcraft impact |
-|---|---|
-| Tool arguments validate through `@earendil-works/pi-schema` instead of TypeBox (1.5) | `patchParameters` stays a plain JSON Schema object with one required string, which `pi-schema` compiles unchanged. Patchcraft uses no TypeBox-only feature (`Type.Refine()`, codecs, `Format.Set()`, `Type.BigInt()`), so no refinement moved into `execute()`. Validation errors the model sees now use `pi-schema` wording (`- patch: missing`), and the argument tests run the same validator the agent loop uses. |
-| Pre-validation coercion (1.5) | Numeric and null arguments are coerced to strings before `execute()`, so `{ patch: 1 }` arrives as `"1"`. The parser, not the schema, rejects it; the constrained-sampling path is unaffected because the grammar already produces a string. |
-| Extension changelogs after an update (1.5) | Optional. Pi reads `pi.changelogPath` or a root `CHANGELOG.md`; Patchcraft ships neither, so nothing is shown and no configuration is needed. |
-| Keybinding hints injected into render contexts (1.5) | `formatPatchResult` takes `keyHint` from the render context, because a package-level import can resolve another module instance that never saw Pi's configured keys. The collapsed multi-file row and the truncation hint now show the configured key. |
-| Resumed sessions keep their active tools (1.3) | Patchcraft captures its baseline before the first replacement and restores only managed `edit`/`write`; reload, resume, tree, and fork tests cover this. |
-| Extension tools active unless `defaultActive: false` (1.4) | A branch without baseline metadata still captures the current tools conservatively instead of guessing `edit`/`write` back on. |
-| `before_agent_start` union and busy-during-start | Patchcraft ignores the event body and calls `syncTools(ctx)`; it never sends a message during start. |
-| Codemode waits for a free worker | No Patchcraft change; `tools.apply_patch()` still returns the same structured result. |
+Development and smoke tests pin Node.js 24.22.2 through mise, locked npm dependencies, Pi 1.5.2,
+and TypeScript 7. Runtime dependencies stay `"*"` peer dependencies.
 
 For example, enable codemode while excluding Pi's `write` tool:
 

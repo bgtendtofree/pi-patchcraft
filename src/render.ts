@@ -26,9 +26,7 @@ const MAX_ROSTER_EXPANDED = 500;
 const MAX_DIFF_EXPANDED = 2000;
 const MAX_DIFF_PER_FILE = 500;
 const MAX_PATH_CHARS = 80;
-const MAX_GLIMPSE_COLLAPSED = 10;
-const MAX_GLIMPSE_EXPANDED = 500;
-const MAX_GLIMPSE_LINE_CHARS = 200;
+const MAX_LINE_CHARS = 200;
 
 function sanitize(text: string): string {
 	return stripTerminalSequences(text)
@@ -111,16 +109,6 @@ function multiSummary(
 	return showCounts && !empty ? `${action} ${countsLabel(theme, added, removed)}` : action;
 }
 
-function multiHeader(
-	files: readonly PreviewFile[],
-	added: number,
-	removed: number,
-	theme: RenderTheme,
-	showCounts: boolean,
-): string {
-	return `${title(theme)}  ${multiSummary(files, added, removed, theme, showCounts)}`;
-}
-
 function rosterLine(file: PreviewFile, theme: RenderTheme): string {
 	return `  ${theme.fg("muted", "└")} ${theme.fg(markColor(file), markLabel(file))} ${theme.fg("accent", pathLabel(file))}${countsSuffix(file, theme)}`;
 }
@@ -139,7 +127,7 @@ function focusFile(files: readonly PreviewFile[]): PreviewFile | undefined {
 
 function sanitizeLine(text: string): string {
 	const clean = sanitize(text).replace(/\n/g, " ");
-	return clean.length > MAX_GLIMPSE_LINE_CHARS ? `${clean.slice(0, MAX_GLIMPSE_LINE_CHARS - 1)}…` : clean;
+	return clean.length > MAX_LINE_CHARS ? `${clean.slice(0, MAX_LINE_CHARS - 1)}…` : clean;
 }
 
 function appendGlimpse(
@@ -150,7 +138,7 @@ function appendGlimpse(
 	indent: string,
 ): void {
 	if (file.operation === "delete" || file.lines.length === 0) return;
-	const max = expanded ? MAX_GLIMPSE_EXPANDED : MAX_GLIMPSE_COLLAPSED;
+	const max = expanded ? MAX_ROSTER_EXPANDED : MAX_ROSTER_COLLAPSED;
 	const visible = file.lines.slice(0, max);
 	for (const line of visible) {
 		const sign = line.type === "add" ? "+" : line.type === "delete" ? "-" : " ";
@@ -188,7 +176,7 @@ function formatCallPreview(preview: PatchPreview, theme: RenderTheme, options: C
 	if (options.executionStarted) return title(theme);
 	// Delete counts are only known after reading the source, so omit uncertain totals from the preview.
 	const showCounts = preview.files.every((file) => file.operation !== "delete");
-	const lines = [multiHeader(preview.files, preview.added, preview.removed, theme, showCounts)];
+	const lines = [`${title(theme)}  ${multiSummary(preview.files, preview.added, preview.removed, theme, showCounts)}`];
 	const max = options.expanded ? MAX_ROSTER_EXPANDED : MAX_ROSTER_COLLAPSED;
 	const visible = preview.files.slice(0, max);
 	const focus = options.argsComplete ? focusFile(visible) : undefined;
@@ -271,8 +259,8 @@ function formatMultiResult(
 	const visible = details.changes.slice(0, max);
 	let remaining = MAX_DIFF_EXPANDED;
 	let truncated = false;
-	for (const change of visible) {
-		lines.push(rosterLine(previewFromChange(change), theme));
+	for (const [index, change] of visible.entries()) {
+		lines.push(rosterLine(files[index] as PreviewFile, theme));
 		if (!expanded) continue;
 		if (remaining <= 0) {
 			truncated = true;
