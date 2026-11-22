@@ -26,7 +26,7 @@
 //!
 //! The parser below is a little more lenient than the explicit spec and allows for
 //! leading/trailing whitespace around patch markers.
-use crate::streaming_parser::StreamingPatchParser;
+use crate::hunk_parser::PatchParser;
 
 use thiserror::Error;
 
@@ -40,7 +40,7 @@ pub(crate) const EOF_MARKER: &str = "*** End of File";
 pub(crate) const CHANGE_CONTEXT_MARKER: &str = "@@ ";
 pub(crate) const EMPTY_CHANGE_CONTEXT_MARKER: &str = "@@";
 
-#[derive(Debug, PartialEq, Error, Clone)]
+#[derive(Debug, PartialEq, Error)]
 pub enum ParseError {
     #[error("invalid patch: {0}")]
     InvalidPatchError(String),
@@ -49,7 +49,8 @@ pub enum ParseError {
 }
 use ParseError::*;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
+#[cfg_attr(test, derive(Clone))]
 #[allow(clippy::enum_variant_names)]
 pub enum Hunk {
     AddFile {
@@ -72,7 +73,8 @@ pub enum Hunk {
 #[cfg(test)]
 use Hunk::*;
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, PartialEq)]
+#[cfg_attr(test, derive(Clone))]
 pub struct UpdateFileChunk {
     /// A single line of context used to narrow down the position of the chunk
     /// (this is usually a class, method, or function definition.)
@@ -114,15 +116,7 @@ pub(crate) fn parse_patch(patch: &str) -> Result<ParsedPatch, ParseError> {
     let lines: Vec<&str> = patch.trim().lines().collect();
     let patch_lines = check_patch_boundaries_lenient(&lines)?;
 
-    let patch = patch_lines.join("\n");
-    let mut parser = StreamingPatchParser::default();
-    parser.push_delta(&patch)?;
-    let hunks = parser.finish()?;
-    let environment_id = parser.environment_id().map(str::to_owned);
-    Ok(ParsedPatch {
-        hunks,
-        environment_id,
-    })
+    PatchParser::parse(patch_lines)
 }
 
 /// Checks the start and end lines of the patch text for `apply_patch`,

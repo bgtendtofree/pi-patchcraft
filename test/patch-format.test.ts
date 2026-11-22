@@ -10,12 +10,12 @@ describe("patch-format", () => {
 		}
 	});
 
-	it("parses padded file headers and move targets", () => {
-		assert.deepEqual(parseFileHeader("*** Add File: padded.txt  "), { operation: "add", path: "padded.txt" });
+	it("parses normalized file headers and move targets", () => {
+		assert.deepEqual(parseFileHeader("*** Add File: padded.txt"), { operation: "add", path: "padded.txt" });
 		assert.deepEqual(parseFileHeader("*** Update File: nested.txt"), { operation: "update", path: "nested.txt" });
 		assert.equal(parseFileHeader("  *** Update File: nested.txt"), undefined);
-		assert.equal(parseFileHeader("*** Add File:   "), undefined);
-		assert.equal(parseMoveTarget("*** Move to: next.txt  "), "next.txt");
+		assert.equal(parseFileHeader("*** Add File:"), undefined);
+		assert.equal(parseMoveTarget("*** Move to: next.txt"), "next.txt");
 		assert.equal(parseMoveTarget(" *** Move to: nested.txt"), undefined);
 	});
 

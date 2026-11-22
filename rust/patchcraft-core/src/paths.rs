@@ -23,7 +23,7 @@ pub(crate) fn parent(path: &Path) -> &Path {
 }
 
 pub(crate) fn canonical(path: &Path) -> Result<PathBuf> {
-    dunce::canonicalize(path).map_err(|error| io_error(path, error))
+    fs::canonicalize(path).map_err(|error| io_error(path, error))
 }
 
 pub(crate) fn wire_path(path: &Path) -> Result<&str> {
@@ -79,7 +79,7 @@ pub(crate) fn lexical_path(cwd: &Path, input: &str) -> Result<PathBuf> {
 pub(crate) fn resolve_parent(lexical: &Path) -> Result<PathBuf> {
     let mut current = parent(lexical);
     loop {
-        match dunce::canonicalize(current) {
+        match fs::canonicalize(current) {
             Ok(real) => {
                 let suffix = lexical.strip_prefix(current).expect("ancestor");
                 return Ok(if suffix.as_os_str().is_empty() {

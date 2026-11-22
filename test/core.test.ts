@@ -49,25 +49,23 @@ it("sends Pi's full diff for a large single-line update", async () => {
 	assert.deepEqual([plan.added, plan.removed, plan.fuzz], [1, 1, 0]);
 });
 
-it("uses the Codex runtime parser for leniencies and empty hunks", async () => {
+it("counts Pi diff rows without counting Unicode separators inside their text", async () => {
 	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
-	const add = "<<'EOF'\n*** Begin Patch\n  *** Add File: padded.txt  \n+first\n+\n+last\n*** End Patch\nEOF\n";
-	const plan = await planPatch(cwd.path, add);
-	await plan.apply();
+	const plan = await planPatch(cwd.path, patch.replace("+hello", "+hello\u2028+same row\u2029-still same row"));
+	try {
+		assert.deepEqual([plan.added, plan.removed], [1, 0]);
+	} finally {
+		await plan.close();
+	}
+});
+
+it("surfaces core parse errors over the wire without committing earlier hunks", async () => {
+	using cwd = mkdtempDisposableSync(path.join(os.tmpdir(), "patchcraft-core-"));
 	await assert.rejects(
-		planPatch(cwd.path, "*** Begin Patch\n*** Update File: padded.txt\n*** Move to: moved.txt\n*** End Patch"),
-		/Update file hunk .* is empty/,
+		planPatch(cwd.path, patch.replace("*** End Patch", "*** Update File: other.txt\n*** End Patch")),
+		/invalid hunk at line 4, Update file hunk .* is empty/,
 	);
-	await assert.rejects(
-		planPatch(cwd.path, "*** Begin Patch\n*** Update File: padded.txt\n@@ first\n@@\n-last\n+changed\n*** End Patch"),
-		/Unexpected line found in update hunk/,
-	);
-	const update = await planPatch(
-		cwd.path,
-		"*** Begin Patch\n*** Update File: padded.txt\n@@\n first\n\n-last\n+changed\n*** End Patch",
-	);
-	await update.apply();
-	assert.equal(readFileSync(path.join(cwd.path, "padded.txt"), "utf8"), "first\n\nchanged\n");
+	assert.equal(existsSync(path.join(cwd.path, "fresh.txt")), false);
 });
 
 it("rejects remote routing and invalid path data before a local mutation", async () => {

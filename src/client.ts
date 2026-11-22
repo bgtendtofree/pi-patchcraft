@@ -16,16 +16,16 @@ const executeFile = promisify(execFile);
 class CoreRejection extends Error {}
 
 /**
- * Plan lifecycle: planned → committing → applied, or committing → failed, or planned → closed.
- * `outcome` tells a failure that never reached the commit line apart from one whose commit the core may
- * have applied.
+ * Planned → waiting for queues → committing → applied. A plan can also be closed
+ * before use or fail; only failures after authorizing commit can have an unknown outcome.
  */
-export type PatchPlanPhase = "planned" | "committing" | "applied" | "failed" | "closed";
+export type PatchPlanPhase = "planned" | "waiting" | "committing" | "applied" | "failed" | "closed";
 export type PatchPlanOutcome = "applied" | "failed" | "unknown";
 
 /** A single state value, so the phase and outcome can never disagree. */
 type PlanState =
 	| { phase: "planned" }
+	| { phase: "waiting" }
 	| { phase: "committing" }
 	| { phase: "applied" }
 	| { phase: "failed"; outcome: "failed" | "unknown" }
@@ -111,14 +111,21 @@ function renderChange(frame: Record<string, unknown>): PatchResultChange {
 		Buffer.from(before, "base64").toString("utf8"),
 		Buffer.from(after, "base64").toString("utf8"),
 	);
+	let added = 0;
+	let removed = 0;
+	// Pi's diff rows are separated by LF, not every line terminator matched by JS's multiline ^.
+	for (const [, sign] of displayDiff.matchAll(/(?:^|\n)([+-])/g)) {
+		if (sign === "+") added++;
+		else removed++;
+	}
 	return {
 		operation,
 		path,
 		targetPath,
 		fuzz,
 		displayDiff,
-		added: (displayDiff.match(/^\+/gm) ?? []).length,
-		removed: (displayDiff.match(/^-/gm) ?? []).length,
+		added,
+		removed,
 	};
 }
 
@@ -172,8 +179,7 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 	const output = frames(child.stdout.iterator({ destroyOnReturn: false }));
 	let state: PlanState = { phase: "planned" };
 	let closing: Promise<void> | undefined;
-	function close(): Promise<void> {
-		if (state.phase === "planned") state = { phase: "closed" };
+	function stopCore(): Promise<void> {
 		closing ??= (async () => {
 			cancel();
 			// Drain stdout before waiting so a response in flight can't block exit.
@@ -182,6 +188,16 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 			await exited;
 		})();
 		return closing;
+	}
+
+	function close(): Promise<void> {
+		if (state.phase === "committing") {
+			// Apply owns the response stream until acknowledgement or failure.
+			cancel();
+			return exited.then(() => undefined);
+		}
+		if (state.phase === "planned" || state.phase === "waiting") state = { phase: "closed" };
+		return stopCore();
 	}
 
 	async function next() {
@@ -245,10 +261,12 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 					const detail = outcome ? `, outcome: ${outcome}` : "";
 					throw new Error(`Patchcraft plan is no longer available (phase: ${state.phase}${detail})`);
 				}
-				state = { phase: "committing" };
+				state = { phase: "waiting" };
 				try {
 					signal?.addEventListener("abort", cancel, { once: true });
 					await withPiQueues(lockPaths, signal, async () => {
+						if (state.phase === "closed") throw new Error("Patchcraft plan was closed before commit");
+						state = { phase: "committing" };
 						try {
 							child.stdin.write("commit\n");
 							const result = await next();
@@ -258,7 +276,7 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 							state = { phase: "applied" };
 						} catch (error) {
 							// Don't release Pi's locks until the core finishes any rollback.
-							await close();
+							await stopCore();
 							if (error instanceof CoreRejection && (await exited).code === 1) {
 								state = { phase: "failed", outcome: "failed" };
 								throw error;
@@ -271,13 +289,12 @@ export async function planPatch(cwd: string, patch: string, signal?: AbortSignal
 						}
 					});
 				} catch (error) {
-					// Only failures before the commit line get here (queue waits, aborts). The commit callback
-					// settles the state itself, so the core never saw a commit in this case.
-					if (state.phase === "committing") state = { phase: "failed", outcome: "failed" };
+					// The commit callback settles post-authorization failures itself.
+					if (state.phase === "waiting") state = { phase: "failed", outcome: "failed" };
 					throw error;
 				} finally {
 					signal?.removeEventListener("abort", cancel);
-					await close();
+					await stopCore();
 				}
 			},
 			close,

@@ -3,10 +3,10 @@ compile_error!("patchcraft-core supports Unix-like systems only");
 
 mod aliases;
 mod file_update;
+mod hunk_parser;
 mod parser;
 mod paths;
 mod seek_sequence;
-mod streaming_parser;
 #[cfg(test)]
 mod tests;
 mod text_file;

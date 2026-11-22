@@ -185,15 +185,9 @@ impl Plan {
             }
             changes.push(change);
         }
-        // One path per change: a move's own source and target may differ only by spelling.
-        aliases::check(changes.iter().map(|change| {
+        aliases::check(changes.iter().enumerate().flat_map(|(owner, change)| {
             let operation = change.summary.operation.label();
-            let path = if change.is_move() {
-                change.target.clone()
-            } else {
-                change.source.clone()
-            };
-            (path, operation)
+            change.touches().map(move |path| (path, operation, owner))
         }))?;
         Ok(Self { changes })
     }
@@ -309,7 +303,10 @@ impl Plan {
                 let suffix = if failures.is_empty() {
                     "All applied changes were rolled back.".into()
                 } else {
-                    format!("Rollback failed:\n{}", failures.join("\n"))
+                    format!(
+                        "Rollback failed. Check the affected files before retrying.\n{}",
+                        failures.join("\n")
+                    )
                 };
                 return Err(format!("Patch application failed: {error}\n{suffix}"));
             }
@@ -390,7 +387,7 @@ fn build_change(cwd: &Path, op: Hunk) -> Result<Change> {
         target = resolved;
         lexical_target = requested;
     }
-    if matches!(kind, Kind::Update | Kind::Move) && target == source && after == before {
+    if kind == Kind::Update && after == before {
         return Err(format!("Update produced no changes: {path}"));
     }
     Ok(Change {
@@ -508,9 +505,12 @@ fn atomic_write(
 }
 
 #[derive(Default)]
-struct Mutation {
-    target_written: bool,
-    source_removed: bool,
+enum Mutation {
+    #[default]
+    Untouched,
+    TargetWritten,
+    SourceRemoved,
+    MoveCompleted,
 }
 
 fn unlink(path: &Path, hook: &mut Hook<'_>) -> io::Result<()> {
@@ -541,11 +541,15 @@ fn apply_change(
             directories,
             hook,
         )?;
-        state.target_written = true;
+        *state = Mutation::TargetWritten;
     }
     if change.after.is_none() || change.is_move() {
         unlink(&change.source, hook).map_err(|error| io_error(&change.source, error))?;
-        state.source_removed = true;
+        *state = if change.is_move() {
+            Mutation::MoveCompleted
+        } else {
+            Mutation::SourceRemoved
+        };
     }
     hook(Step::Applied, &change.target).map_err(|error| io_error(&change.target, error))
 }
@@ -556,7 +560,7 @@ fn rollback_change(
     directories: &mut Vec<PathBuf>,
     hook: &mut Hook<'_>,
 ) -> Result<()> {
-    if state.source_removed {
+    if matches!(state, Mutation::SourceRemoved | Mutation::MoveCompleted) {
         // Restore first: if this fails, the move destination may be the only remaining copy.
         if let Some(before) = &change.before {
             atomic_write(
@@ -569,7 +573,7 @@ fn rollback_change(
             )?;
         }
     }
-    if state.target_written {
+    if matches!(state, Mutation::TargetWritten | Mutation::MoveCompleted) {
         if change.is_move() || change.before.is_none() {
             remove_if_present(&change.target, hook)?;
         } else if let Some(before) = &change.before {

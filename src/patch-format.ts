@@ -21,7 +21,7 @@ export type PatchOperation = "add" | "update" | "delete" | "move";
 
 type FileHeaderOperation = Exclude<PatchOperation, "move">;
 
-export interface FileHeader {
+interface FileHeader {
 	operation: FileHeaderOperation;
 	path: string;
 }
@@ -45,18 +45,13 @@ export function normalizeMarkerLine(line: string, operation: PatchOperation | un
  * whitespace is ignored; a header without a path does not match.
  */
 export function parseFileHeader(line: string): FileHeader | undefined {
-	const normalized = line.trimEnd();
 	for (const [operation, marker] of FILE_HEADERS) {
-		if (!normalized.startsWith(marker)) continue;
-		return { operation, path: normalized.slice(marker.length).trimEnd() };
+		if (line.startsWith(marker)) return { operation, path: line.slice(marker.length) };
 	}
 	return undefined;
 }
 
 /** Parse `*** Move to:` from a normalized marker line. */
 export function parseMoveTarget(line: string): string | undefined {
-	const normalized = line.trimEnd();
-	if (!normalized.startsWith(PATCH_MARKERS.move)) return undefined;
-	const target = normalized.slice(PATCH_MARKERS.move.length).trimEnd();
-	return target || undefined;
+	return line.startsWith(PATCH_MARKERS.move) ? line.slice(PATCH_MARKERS.move.length) : undefined;
 }

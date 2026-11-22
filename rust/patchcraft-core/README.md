@@ -38,9 +38,11 @@ does not undo a successful patch. Rollback is not crash recovery.
 
 From [OpenAI Codex at `ca21fe65d18a9b6326759fb4263c65dfbb645aa5`](https://github.com/openai/codex/tree/ca21fe65d18a9b6326759fb4263c65dfbb645aa5):
 
-- `src/parser.rs` and `src/streaming_parser.rs` reuse the runtime parser from
-  `codex-rs/apply-patch/src/`. The port removes Codex's `PathUri` integration
-  and returns only hunks and the environment directive; it adds no syntax rules.
+- `src/parser.rs` and `src/hunk_parser.rs` adapt `parser.rs` and
+  `streaming_parser.rs` from `codex-rs/apply-patch/src/`. Patchcraft receives
+  complete requests, so the hunk parser walks borrowed lines and returns the
+  finished hunks and environment directive without streaming snapshots. The
+  port removes Codex's `PathUri` integration and adds no syntax rules.
 - `src/file_update.rs` uses the same replacement computation on text supplied
   by the transaction. `src/seek_sequence.rs` uses the same match order,
   whitespace, and punctuation rules, with a comparison budget and fuzz

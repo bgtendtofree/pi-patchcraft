@@ -110,24 +110,18 @@ export function scanPatchPreview(input: string): PatchPreview {
 		) {
 			continue;
 		}
-		if (current.operation === "add") {
-			if (line.startsWith("+")) {
-				current.added++;
-				added++;
-				pushLine(current, "add", line.slice(1));
-			}
-			continue;
-		}
 		if (line.startsWith("+")) {
 			current.added++;
 			added++;
 			pushLine(current, "add", line.slice(1));
-		} else if (line.startsWith("-")) {
-			current.removed++;
-			removed++;
-			pushLine(current, "delete", line.slice(1));
-		} else if (line.startsWith(" ")) {
-			pushLine(current, "context", line.slice(1));
+		} else if (current.operation !== "add") {
+			if (line.startsWith("-")) {
+				current.removed++;
+				removed++;
+				pushLine(current, "delete", line.slice(1));
+			} else if (line.startsWith(" ")) {
+				pushLine(current, "context", line.slice(1));
+			}
 		}
 	}
 

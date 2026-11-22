@@ -70,6 +70,36 @@ fn rejects_a_move_destination_aliasing_a_pending_target() {
 }
 
 #[test]
+fn rejects_an_add_aliasing_a_moves_source() {
+    let cwd = workspace();
+    write(cwd.path(), "source.txt", "old\n");
+    let error = plan_error(
+        cwd.path(),
+        "*** Begin Patch\n*** Update File: source.txt\n*** Move to: moved.txt\n@@\n old\n*** Add File: SOURCE.txt\n+new\n*** End Patch",
+    );
+    assert!(error.contains("conflicting operations"), "{error}");
+    assert_eq!(entries(cwd.path()), ["source.txt"]);
+    assert_eq!(read(cwd.path(), "source.txt"), "old\n");
+}
+
+#[test]
+fn permits_case_only_moves_when_the_destination_does_not_exist() {
+    let cwd = workspace();
+    write(cwd.path(), "source.txt", "old\n");
+    let result = common::plan(
+        cwd.path(),
+        "*** Begin Patch\n*** Update File: source.txt\n*** Move to: SOURCE.txt\n@@\n old\n*** End Patch",
+    );
+    if cwd.path().join("SOURCE.txt").exists() {
+        assert!(result.err().unwrap().contains("Move target already exists"));
+    } else {
+        common::apply(result.unwrap());
+        assert_eq!(entries(cwd.path()), ["SOURCE.txt"]);
+        assert_eq!(read(cwd.path(), "SOURCE.txt"), "old\n");
+    }
+}
+
+#[test]
 fn rejects_a_touched_file_that_is_an_ancestor_of_another() {
     let cwd = workspace();
     let error = plan_error(

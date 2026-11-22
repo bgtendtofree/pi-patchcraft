@@ -21,10 +21,6 @@ async function planPatch(cwd: string, patch: string) {
 	return plan;
 }
 
-function applyPatchPlan(plan: Awaited<ReturnType<typeof openPlan>>, signal?: AbortSignal) {
-	return plan.apply(signal);
-}
-
 async function workspace(): Promise<string> {
 	const directory = await mkdtemp(path.join(os.tmpdir(), "pi-patchcraft-"));
 	temporaryDirectories.push(directory);
@@ -59,7 +55,7 @@ describe("patch planning and application", () => {
 		assert.match(plan.changes[1]?.displayDiff ?? "", /-1 before/);
 		assert.match(plan.changes[1]?.displayDiff ?? "", /\+1 after/);
 
-		await applyPatchPlan(plan);
+		await plan.apply();
 		assert.equal(await readFile(path.join(cwd, "nested/new.txt"), "utf8"), "created\n");
 		assert.equal(await readFile(path.join(cwd, "update.txt"), "utf8"), "after\n");
 		await assert.rejects(readFile(path.join(cwd, "delete.txt")));
@@ -80,20 +76,6 @@ describe("patch planning and application", () => {
 		);
 	});
 
-	it("rejects two spellings of one file before any mutation", async () => {
-		const cwd = await workspace();
-		const target = path.join(cwd, "value.txt");
-		await writeFile(target, "old\n");
-		await assert.rejects(
-			planPatch(
-				cwd,
-				"*** Begin Patch\n*** Update File: value.txt\n@@\n-old\n+one\n*** Update File: VALUE.txt\n@@\n-old\n+two\n*** End Patch",
-			),
-			/conflicting operations/,
-		);
-		assert.equal(await readFile(target, "utf8"), "old\n");
-	});
-
 	it("creates or overwrites a file with Add File like Codex, capturing old content", async () => {
 		const cwd = await workspace();
 		const target = path.join(cwd, "existing.txt");
@@ -101,12 +83,12 @@ describe("patch planning and application", () => {
 		const overwrite = await planPatch(cwd, "*** Begin Patch\n*** Add File: existing.txt\n+new\n*** End Patch");
 		assert.match(overwrite.changes[0]?.displayDiff ?? "", /-1 old/);
 		assert.equal(await readFile(target, "utf8"), "old\n");
-		await applyPatchPlan(overwrite);
+		await overwrite.apply();
 		assert.equal(await readFile(target, "utf8"), "new\n");
 
 		const create = await planPatch(cwd, "*** Begin Patch\n*** Add File: fresh.txt\n+fresh\n*** End Patch");
 		assert.equal(create.changes[0]?.removed, 0);
-		await applyPatchPlan(create);
+		await create.apply();
 		assert.equal(await readFile(path.join(cwd, "fresh.txt"), "utf8"), "fresh\n");
 	});
 
@@ -124,7 +106,7 @@ describe("patch planning and application", () => {
 		let applying: Promise<void> | undefined;
 		await withFileMutationQueue(target, async () => {
 			let done = false;
-			applying = applyPatchPlan(plan).then(() => {
+			applying = plan.apply().then(() => {
 				done = true;
 			});
 			await new Promise((resolve) => setTimeout(resolve, 50));
@@ -148,7 +130,7 @@ describe("patch planning and application", () => {
 		let applying: Promise<void> | undefined;
 		await withFileMutationQueue(submitted, async () => {
 			let done = false;
-			applying = applyPatchPlan(plan).then(() => {
+			applying = plan.apply().then(() => {
 				done = true;
 			});
 			await new Promise((resolve) => setTimeout(resolve, 50));
@@ -190,7 +172,7 @@ describe("patch planning and application", () => {
 		await writeFile(path.join(cwd, "realZ/two.txt"), "drift\n");
 		let timer: NodeJS.Timeout | undefined;
 		const settled = await Promise.race([
-			Promise.allSettled([applyPatchPlan(linkPlan), applyPatchPlan(directPlan)]),
+			Promise.allSettled([linkPlan.apply(), directPlan.apply()]),
 			new Promise<never>((_resolve, reject) => {
 				timer = setTimeout(() => reject(new Error("deadlock")), 5000);
 			}),
@@ -211,7 +193,7 @@ describe("patch planning and application", () => {
 		);
 		const controller = new AbortController();
 		controller.abort();
-		await assert.rejects(applyPatchPlan(plan, controller.signal), /abort/i);
+		await assert.rejects(plan.apply(controller.signal), /abort/i);
 		assert.equal(plan.phase, "failed");
 		assert.equal(plan.outcome, "failed");
 		assert.equal(await readFile(target, "utf8"), "before\n");
@@ -232,6 +214,22 @@ describe("patch planning and application", () => {
 		await rejected;
 		assert.equal(plan.phase, "failed");
 		assert.equal(plan.outcome, "failed");
+		await assert.rejects(stat(target), { code: "ENOENT" });
+	});
+
+	it("can close a waiting plan without authorizing commit or waiting on its Pi queue", async () => {
+		const cwd = await workspace();
+		const target = path.join(cwd, "fresh.txt");
+		const plan = await planPatch(cwd, "*** Begin Patch\n*** Add File: fresh.txt\n+new\n*** End Patch");
+		let rejected: Promise<void> | undefined;
+		await withFileMutationQueue(target, async () => {
+			rejected = assert.rejects(plan.apply(), /closed before commit/);
+			assert.equal(plan.phase, "waiting");
+			await plan.close();
+			assert.equal(plan.phase, "closed");
+		});
+		await rejected;
+		assert.equal(plan.outcome, undefined);
 		await assert.rejects(stat(target), { code: "ENOENT" });
 	});
 });

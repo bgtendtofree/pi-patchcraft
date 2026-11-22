@@ -123,7 +123,7 @@ patchcraft-core doctor --json
 
 The extension uses `PATCHCRAFT_BIN` if set to an absolute path, then its bundled
 core, then `patchcraft-core` on `PATH`. The extension and CLI must speak the
-same protocol (currently `4`). Git installs do not build the core automatically.
+same protocol (currently `5`). Git installs do not build the core automatically.
 
 Then install the Pi extension:
 
@@ -204,6 +204,18 @@ TypeScript only registers the tool, drives the session, and formats the
 streaming preview and final diff. Run `mise run rust:check` for core tests
 and `mise run ci` for the full gate, including the packed extension with the
 real CLI.
+
+State is owned at the boundary where each decision is made:
+
+| Owner | Lifecycle |
+| --- | --- |
+| `src/index.ts` | Restore branch mode and baseline → serialize model/mode updates → check core → reconcile active tools. Drop work from stale branches. |
+| `src/index.ts`, `src/render.ts` | Arguments streaming → preview ready → executing; result row renders progress, success, or error. Derive these from Pi's flags, not a second lifecycle. |
+| `src/preview.ts` | Seek patch start → scan the current file → stop at the end or preview limit. This tolerates incomplete input and never authorizes writes. |
+| `src/client.ts`, `rust/patchcraft-core/src/main.rs` | Read request and plan frames → wait for Pi queues → authorize commit → await acknowledgement and exit. Closing before authorization discards the plan; after authorization the core handles cancellation. |
+| `rust/patchcraft-core/src/hunk_parser.rs` | Read top-level directives and file hunks → validate update chunks and their EOF markers → finish the patch. |
+| `rust/patchcraft-core/src/paths.rs`, `seek_sequence.rs` | Resolve path components until a file or missing suffix is reached; match hunks in Codex order under a comparison budget. |
+| `rust/patchcraft-core/src/transaction.rs` | Preflight → revalidate under queues → mutate → finish or unwind completed filesystem steps in reverse order. |
 
 Tests follow the same ownership boundary:
 

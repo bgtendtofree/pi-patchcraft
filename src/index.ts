@@ -70,12 +70,6 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		}
 	}
 
-	/** Checked on every sync rather than cached (about 2 ms), so fixing the install applies on the next turn. */
-	async function coreProblem(ctx: ExtensionContext): Promise<string | undefined> {
-		if (!wantsPatchcraft(ctx)) return undefined;
-		return checkCore(coreBinary(), ctx.cwd);
-	}
-
 	function modeStatus(ctx: ExtensionContext, problem: string | undefined): string {
 		// Report the loadout Pi actually has, not just the selected mode.
 		const enabled = pi.getActiveTools().includes("apply_patch") && !problem;
@@ -107,13 +101,16 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 			pi.appendEntry(baselineEntryType, { tools });
 			baselineTools = tools;
 		}
-		const problem = await coreProblem(ctx);
+		// Use the same requested state for the check and reconciliation. The mode can change
+		// while doctor is running. Do not cache its result: a repaired core works on the next turn.
+		const requested = wantsPatchcraft(ctx);
+		const problem = requested ? await checkCore(coreBinary(), ctx.cwd) : undefined;
 		if (currentGeneration !== generation) return undefined;
 		const current = pi.getActiveTools();
 		const next = reconcileActiveTools({
 			baseline: baselineTools,
 			current,
-			usePatchcraft: wantsPatchcraft(ctx) && !problem,
+			usePatchcraft: requested && !problem,
 		});
 		if (next.length !== current.length || next.some((name, index) => name !== current[index])) pi.setActiveTools(next);
 		if (problem && notify && problem !== warned) ctx.ui.notify(`Patchcraft disabled. ${problem}`, "warning");
@@ -126,7 +123,7 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		async handler(args, ctx) {
 			const value = args.trim().toLowerCase();
 			if (value === "" || value === "status") {
-				const problem = await coreProblem(ctx);
+				const problem = wantsPatchcraft(ctx) ? await checkCore(coreBinary(), ctx.cwd) : undefined;
 				ctx.ui.notify(`${modeStatus(ctx, problem)}\nUsage: /patchcraft auto|on|off`, problem ? "warning" : "info");
 				return;
 			}

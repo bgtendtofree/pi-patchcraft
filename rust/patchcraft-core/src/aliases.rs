@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -14,37 +14,36 @@ fn fold(path: &str) -> String {
 /// Reject distinct spellings of one file and file/directory conflicts. Comparisons ignore case and
 /// normalization on every host, so a patch behaves the same on case-sensitive and
 /// case-insensitive filesystems instead of depending on a probe of the current one.
-pub(crate) fn check(paths: impl IntoIterator<Item = (PathBuf, &'static str)>) -> Result<()> {
-    let mut operations: HashMap<PathBuf, &'static str> = HashMap::new();
-    let mut folded: HashMap<String, PathBuf> = HashMap::new();
-    let mut entries: Vec<(PathBuf, String)> = Vec::new();
-    for (path, operation) in paths {
-        if operations.insert(path.clone(), operation).is_some() {
-            // Both spellings of one change: a move's source and target, or an add's path.
-            continue;
+pub(crate) fn check<'a>(
+    paths: impl IntoIterator<Item = (&'a Path, &'static str, usize)>,
+) -> Result<()> {
+    let mut folded = HashMap::<String, (&Path, &str, usize)>::new();
+    let mut entries = Vec::new();
+    for (path, operation, owner) in paths {
+        let key = fold(wire_path(path)?);
+        let (previous, previous_operation, previous_owner) = *folded
+            .entry(key.clone())
+            .or_insert((path, operation, owner));
+        // A move's own source and destination may differ only in case/normalization.
+        if owner != previous_owner {
+            return Err(conflict(previous, previous_operation));
         }
-        let key = fold(wire_path(&path)?);
-        if let Some(previous) = folded.get(&key) {
-            return Err(conflict(previous, &operations));
-        }
-        folded.insert(key.clone(), path.clone());
-        entries.push((path, key));
+        entries.push((key, path, operation));
     }
-    for (path, key) in &entries {
-        for prefix in Path::new(key).ancestors().skip(1) {
+    for (key, path, operation) in entries {
+        for prefix in Path::new(&key).ancestors().skip(1) {
             if prefix
                 .to_str()
                 .is_some_and(|prefix| folded.contains_key(prefix))
             {
-                return Err(conflict(path, &operations));
+                return Err(conflict(path, operation));
             }
         }
     }
     Ok(())
 }
 
-fn conflict(path: &Path, operations: &HashMap<PathBuf, &'static str>) -> String {
-    let operation = operations.get(path).copied().unwrap_or("operation");
+fn conflict(path: &Path, operation: &str) -> String {
     format!(
         "Patch contains conflicting operations for {} ({operation})",
         path.display()
