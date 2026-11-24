@@ -1,6 +1,8 @@
 [tools]
 node = "24.22.2"
-rust = "stable"
+
+[settings]
+idiomatic_version_file_enable_tools = ["rust"]
 
 [tasks."rust:check"]
 description = "Check the Rust core"
