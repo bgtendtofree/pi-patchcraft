@@ -26,7 +26,6 @@ Patchcraft gives GPT models their familiar Codex patch language. It validates th
 - Session-scoped `/patchcraft auto|on|off` override for any model
 - Codex-style summary with per-file counts, add/update/delete/move labels, and a multi-file roster
 - Per-file diffs rendered with Pi's native diff renderer, collapsed or expanded
-- Streaming per-file counters while the patch is generated
 - Native Pi components and diff renderer, no custom shell
 
 ## Patch format
@@ -145,18 +144,18 @@ pi -e git:github.com/bgtendtofree/pi-patchcraft
 
 ## Rendering
 
-Patchcraft registers `renderCall` and `renderResult`. The call row previews the request: a Codex-style summary, per-file counters while the patch streams, a multi-file roster, and a bounded glimpse of the focused file once the arguments are complete. When execution starts, a single-file call row keeps its header and counts; a multi-file call row keeps only the tool name, leaving the exact totals, roster, and diffs to the result row. The result row is self-contained: a single-file patch shows its full diff (matching Pi's `edit`), while a multi-file patch shows the exact counts and the roster, plus an expand hint when there are diffs; expanded results add bounded per-file diffs through Pi's native `renderDiff`.
+While arguments stream or execution runs, the call row shows only `apply_patch`. Once arguments are complete, it can preview the file operations without reading file contents or rendering a speculative diff:
 
 ```text
-apply_patch  Edited src/app.ts (+3 -1)
+apply_patch
+  M src/app.ts
+  A src/new.ts
+  D old.txt
 ```
 
-```text
-apply_patch  Edited 3 files
-  └ M src/app.ts (+3 -1)
-  └ A src/new.ts (+2 -0)
-  └ D old.txt
-```
+Single-file results show up to 20 diff lines by default. Use Pi's displayed expand key to see the full diff. Multi-file diffs stay collapsed until expanded (up to 500 lines per file and 2,000 total).
+
+To measure planning costs locally, run `cargo build --release --locked && node scripts/bench-plan.mjs`. It changes one line in temporary 64 KiB, 1 MiB, and 4 MiB files and reports medians over seven runs after warm-up. `receivedMs` includes process startup, Rust planning, and receipt of the complete change frame; `decodeMs` covers JSON and base64/UTF-8 decoding; `diffMs` times Pi's diff generator. `planMs` stops before commit and excludes TUI rendering.
 
 Once the result arrives, the result row carries the exact totals and keeps the roster:
 
@@ -204,7 +203,7 @@ PATCHCRAFT_BIN="$PWD/target/debug/patchcraft-core" pi -e ./src/index.ts
 path resolution, planning, writes, and rollback. Pi holds its native file
 queues from commit authorization through the core's exit, including rollback.
 TypeScript only registers the tool, drives the session, and formats the
-streaming preview and final diff. Run `mise run rust:check` for core tests
+ready-state roster and final diff. Run `mise run rust:check` for core tests
 and `mise run ci` for the full gate, including the packed extension with the
 real CLI.
 

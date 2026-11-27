@@ -538,6 +538,18 @@ describe("pi-patchcraft extension", () => {
 		const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 		const patch = "*** Begin Patch\n*** Update File: value.txt\n@@\n-before\n+after\n*** End Patch";
 		const state = {};
+		const streaming = (
+			tool.renderCall as (args: unknown, theme: unknown, context: unknown) => { render(width: number): string[] }
+		)(
+			{
+				get patch() {
+					throw new Error("read partial patch");
+				},
+			},
+			theme,
+			{ argsComplete: false },
+		);
+		assert.equal(streaming.render(80).join("").trim(), "apply_patch");
 		const call = (tool.renderCall as (args: unknown, theme: unknown, context: unknown) => unknown)({ patch }, theme, {
 			expanded: false,
 			argsComplete: true,
@@ -548,8 +560,7 @@ describe("pi-patchcraft extension", () => {
 		const callText = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
 		assert.match(callText, /apply_patch/);
 		assert.match(callText, /value\.txt/);
-		assert.match(callText, /-before/);
-		assert.match(callText, /\+after/);
+		assert.doesNotMatch(callText, /before|after/);
 
 		const renderKeyHint = (keybinding: string, description: string) => `${keybinding} ${description}`;
 		const result = await tool.execute("render", { patch }, undefined, undefined, { cwd });
@@ -569,9 +580,9 @@ describe("pi-patchcraft extension", () => {
 
 		// The result row must not rewrite the call row; the call preview stays visible.
 		const previewCallText = stripTerminalSequences((call as { render(width: number): string[] }).render(80).join("\n"));
-		assert.match(previewCallText, /-before/);
+		assert.equal(previewCallText, callText);
 
-		// Once execution starts, the call row drops the glimpse and leaves the diff to the result row.
+		// Once execution starts, the call row drops the roster and leaves the diff to the result row.
 		const executing = (tool.renderCall as (args: unknown, theme: unknown, context: unknown) => unknown)(
 			{ patch },
 			theme,
@@ -587,7 +598,7 @@ describe("pi-patchcraft extension", () => {
 		const executingText = stripTerminalSequences(
 			(executing as { render(width: number): string[] }).render(80).join("\n"),
 		);
-		assert.equal(executingText.trimEnd(), "apply_patch  Edited value.txt (+1 -1)");
+		assert.equal(executingText.trimEnd(), "apply_patch");
 		assert.equal(result.details.added, 1);
 		assert.equal(await readFile(path.join(cwd, "value.txt"), "utf8"), "after\n");
 

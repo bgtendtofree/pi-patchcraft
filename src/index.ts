@@ -3,14 +3,13 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { checkCore, coreBinary, planPatch } from "./client.ts";
 import { APPLY_PATCH_LARK_GRAMMAR } from "./grammar.ts";
-import { scanPatchPreview } from "./preview.ts";
 import {
 	APPLY_PATCH_DESCRIPTION,
 	APPLY_PATCH_PARAMETER_DESCRIPTION,
 	APPLY_PATCH_PROMPT_GUIDELINES,
 	APPLY_PATCH_PROMPT_SNIPPET,
 } from "./prompt.ts";
-import { type CallPhase, formatPatchCall, formatPatchError, formatPatchProgress, formatPatchResult } from "./render.ts";
+import { formatPatchCall, formatPatchError, formatPatchProgress, formatPatchResult } from "./render.ts";
 import { isPatchcraftModel, reconcileActiveTools } from "./tools.ts";
 import { type PatchResultDetails, patchResultSchema } from "./types.ts";
 
@@ -27,12 +26,6 @@ type PatchcraftMode = "auto" | "off" | "on";
 
 interface PatchcraftModeState {
 	mode: PatchcraftMode;
-}
-
-/** The call row follows the request until execution starts; once it has, the result row owns the details. */
-function callPhase(context: { argsComplete: boolean; executionStarted: boolean }): CallPhase {
-	if (context.executionStarted) return "running";
-	return context.argsComplete ? "ready" : "streaming";
 }
 
 export default function piPatchcraft(pi: ExtensionAPI): void {
@@ -156,10 +149,11 @@ export default function piPatchcraft(pi: ExtensionAPI): void {
 		renderCall(args, theme, context) {
 			const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
 			component.setText(
-				formatPatchCall(scanPatchPreview(typeof args?.patch === "string" ? args.patch : ""), theme, {
-					expanded: context.expanded,
-					phase: callPhase(context),
-				}),
+				formatPatchCall(
+					context.argsComplete && !context.executionStarted ? args?.patch : undefined,
+					theme,
+					context.expanded,
+				),
 			);
 			return component;
 		},

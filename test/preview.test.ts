@@ -19,36 +19,19 @@ describe("scanPatchPreview", () => {
 			{
 				operation: "add",
 				path: "a.txt",
-				added: 2,
-				removed: 0,
-				lines: [
-					{ type: "add", text: "one" },
-					{ type: "add", text: "two" },
-				],
 			},
 			{
 				operation: "move",
 				path: "b.txt",
 				targetPath: "c.txt",
-				added: 2,
-				removed: 1,
-				lines: [
-					{ type: "delete", text: "old" },
-					{ type: "add", text: "new" },
-					{ type: "add", text: "again" },
-				],
 			},
 		]);
-		assert.equal(preview.added, 4);
-		assert.equal(preview.removed, 1);
 		assert.equal(preview.truncated, false);
 	});
 
 	it("ignores text outside the envelope and malformed lines", () => {
 		assert.deepEqual(scanPatchPreview("not a patch"), {
 			files: [],
-			added: 0,
-			removed: 0,
 			truncated: false,
 		});
 		const preview = scanPatchPreview(`*** Begin Patch
@@ -58,7 +41,7 @@ garbage
 *** End Patch
 *** Add File: after.txt
 +ignored`);
-		assert.deepEqual(preview.files, [{ operation: "delete", path: "gone.txt", added: 0, removed: 0, lines: [] }]);
+		assert.deepEqual(preview.files, [{ operation: "delete", path: "gone.txt" }]);
 	});
 
 	it("caps the roster and marks the preview truncated", () => {
@@ -78,7 +61,6 @@ garbage
 	it("matches padded top-level headers and keeps indented update markers as context", () => {
 		const padded = scanPatchPreview("*** Begin Patch\n  *** Add File: padded.txt  \n+first\n*** End Patch");
 		assert.equal(padded.files[0]?.path, "padded.txt");
-		assert.equal(padded.files[0]?.added, 1);
 
 		const topUpdate = scanPatchPreview("*** Begin Patch\n  *** Update File: foo.txt\n@@\n-old\n+new\n*** End Patch");
 		assert.equal(topUpdate.files[0]?.operation, "update");
@@ -96,12 +78,5 @@ garbage
 *** End Patch`);
 		assert.equal(nested.files.length, 1);
 		assert.equal(nested.files[0]?.path, "a.txt");
-		assert.deepEqual(nested.files[0]?.lines, [
-			{ type: "delete", text: "old a" },
-			{ type: "add", text: "new a" },
-			{ type: "context", text: "*** Update File: b.txt" },
-			{ type: "delete", text: "old b" },
-			{ type: "add", text: "new b" },
-		]);
 	});
 });
