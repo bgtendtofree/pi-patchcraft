@@ -175,6 +175,9 @@ Patch execution and returned `content`, `details`, and `structuredContent` are u
 
 Runtime requires Node.js `>=24` and the matching Rust executable. The project
 uses Node.js 24.22.2, Pi 1.5.2, and stable Rust for local development and CI.
+The Rust toolchain uses the minimal install profile plus rustfmt and Clippy.
+Debug and test builds keep source locations for backtraces without full debug
+info. Local builds keep Cargo's incremental cache enabled; CI does not.
 
 ```bash
 mise install

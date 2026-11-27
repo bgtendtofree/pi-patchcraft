@@ -33,6 +33,8 @@ jobs:
         uses: jdx/mise-action@v4
 
       - name: Run CI gate
+        env:
+          CARGO_INCREMENTAL: "0"
         run: mise run ci
 
       - name: Save verified core for the tagged release
